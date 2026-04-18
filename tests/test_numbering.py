@@ -109,6 +109,68 @@ class TestExtractCrossRefs:
         assert extract_cross_refs("본문") == []
 
 
+# ── Reference-text normalization ───────────────────────────────────────────
+class TestNormalizeRefText:
+    def test_en_dash_in_range(self):
+        # "A24–A26" (U+2013 en-dash) should be treated the same as "A24-A26".
+        assert extract_cross_refs("(문단 A24\u2013A26 참조)") == ["A24-A26"]
+
+    def test_em_dash_in_paren_range(self):
+        # "49(a)—(c)" (U+2014 em-dash) captured and expanded via paren shorthand.
+        refs = extract_cross_refs("(문단 49(a)\u2014(c) 참조)")
+        assert expand_cross_refs(refs) == ["49(a)", "49(b)", "49(c)"]
+
+    def test_figure_dash_in_range(self):
+        # U+2012 figure dash is another typographer variant used in PDFs.
+        refs = extract_cross_refs("(문단 A12\u2012A14 참조)")
+        assert expand_cross_refs(refs) == ["A12", "A13", "A14"]
+
+    def test_prefix_omitted_range(self):
+        # "A38-40" is shorthand where the translator dropped the second "A".
+        assert expand_cross_refs(["A38-40"]) == ["A38", "A39", "A40"]
+
+    def test_prefix_omitted_via_extract(self):
+        # Same shape reaching us through the full extract→expand pipeline.
+        refs = extract_cross_refs("(문단 A38-40 참조)")
+        assert expand_cross_refs(refs) == ["A38", "A39", "A40"]
+
+    def test_space_in_range(self):
+        # "A12- A13" is the same reference; the stray space must not split it.
+        refs = extract_cross_refs("(문단 A12- A13 참조)")
+        assert expand_cross_refs(refs) == ["A12", "A13"]
+
+    def test_spaces_around_range_dash(self):
+        # "A12 - A13" with spaces on both sides of the hyphen.
+        refs = extract_cross_refs("(문단 A12 - A13 참조)")
+        assert expand_cross_refs(refs) == ["A12", "A13"]
+
+    def test_uija_particle(self):
+        # "49의 (a)-(c)" — Korean possessive between id and paren sub-item.
+        refs = extract_cross_refs("(문단 49의 (a)-(c) 참조)")
+        assert expand_cross_refs(refs) == ["49(a)", "49(b)", "49(c)"]
+
+    def test_a_prefix_space(self):
+        # "A 30" — stray space inside the "A" prefix.
+        refs = extract_cross_refs("(문단 A 30 참조)")
+        assert expand_cross_refs(refs) == ["A30"]
+
+    def test_compound_list_after_single_문단(self):
+        # Only one "문단" keyword but several comma-separated targets.
+        refs = extract_cross_refs("(문단 A11-A14, A20 참조)")
+        assert expand_cross_refs(refs) == ["A11", "A12", "A13", "A14", "A20"]
+
+    def test_compound_with_wa(self):
+        # Korean conjunction 와 inside a single "문단" span is absorbed.
+        refs = extract_cross_refs("문단 A22와 A28 참조")
+        assert expand_cross_refs(refs) == ["A22", "A28"]
+
+    def test_dash_in_prose_left_alone(self):
+        # A word-break hyphen in prose (Korean glyphs on both sides) does not
+        # match the reference-dash normalizer, so no false positive.
+        refs = extract_cross_refs("자세한 논의는-또는-별도의 지침을 참조하라")
+        assert refs == []
+
+
 # ── Standard header ────────────────────────────────────────────────────────
 class TestMatchStandardHeader:
     def test_typical(self):

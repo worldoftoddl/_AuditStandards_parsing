@@ -39,9 +39,17 @@ APP_ID: Final[re.Pattern[str]] = re.compile(
     re.UNICODE | re.DOTALL,
 )
 # Cross-references may span a range with matching/mixed prefixes: "문단 A24-A26"
-# or "문단 12-14". Capture the whole range as the target.
+# or "문단 12-14". Compound lists joined by commas, "、", or the Korean
+# connectives 와/과/및 are absorbed into one target span so downstream expansion
+# can split them: "문단 A11-A14, A20" → "A11-A14, A20".
+# Range-end may also be a bare "(x)" sub-item used as shorthand: "12(a)-(c)".
+_RANGE_END: Final[str] = rf"(?:A?{_ID_BODY}|\([a-z]\))"
+_CONNECTOR: Final[str] = r"(?:\s*[,、]\s*|\s*(?:와|과|및)\s*)"
 CROSS_REF: Final[re.Pattern[str]] = re.compile(
-    rf"문단\s+(?P<target>A?{_ID_BODY}(?:-A?{_ID_BODY})?)",
+    rf"문단\s+(?P<target>"
+    rf"A?{_ID_BODY}(?:-{_RANGE_END})?"
+    rf"(?:{_CONNECTOR}A?{_ID_BODY}(?:-{_RANGE_END})?)*"
+    rf")",
     re.UNICODE,
 )
 
@@ -77,6 +85,44 @@ def normalize(text: str) -> str:
     return unicodedata.normalize("NFKC", text)
 
 
+# Dash variants U+2010..U+2015 appear in cross-reference ranges (typographic
+# en/em/figure dashes, horizontal bar). NFKC does not collapse these to ASCII
+# hyphen, so we do it explicitly before CROSS_REF matches.
+_DASH_NORMALIZE: Final[re.Pattern[str]] = re.compile(r"[\u2010-\u2015]", re.UNICODE)
+# Korean possessive particle between a numeric id and a paren sub-item:
+# "49의 (a)" → "49(a)". Translators used both forms in the 2025 revision.
+_UI_PARTICLE: Final[re.Pattern[str]] = re.compile(r"(\d)의\s+\(", re.UNICODE)
+# Whitespace surrounding a hyphen between two reference atoms. Constrained by
+# alphanumeric/paren lookbehind+lookahead to avoid touching unrelated prose.
+_DASH_WS: Final[re.Pattern[str]] = re.compile(
+    r"(?<=[A-Za-z0-9\)])\s*-\s*(?=[A-Za-z0-9\(])",
+    re.UNICODE,
+)
+# Space inserted between the "A" prefix and its digits: "A 30" → "A30".
+_A_SPACE: Final[re.Pattern[str]] = re.compile(r"\bA\s+(?=\d)", re.UNICODE)
+
+
+def _normalize_ref_text(text: str) -> str:
+    """Normalize cross-reference artifacts before :data:`CROSS_REF` matching.
+
+    Applied independently from :func:`normalize` (which does NFKC only):
+
+    - Replace Unicode dash variants (U+2010..U+2015) with ASCII hyphen.
+    - Collapse ``N의 (x)`` into ``N(x)`` (Korean possessive particle).
+    - Remove whitespace around hyphens that sit between reference atoms.
+    - Remove whitespace between an uppercase ``A`` prefix and its digits.
+
+    The lookbehind/lookahead constraints on ``_DASH_WS`` limit changes to
+    contexts that look like reference ranges, so arbitrary dashes in body
+    prose are not affected.
+    """
+    text = _DASH_NORMALIZE.sub("-", text)
+    text = _UI_PARTICLE.sub(r"\1(", text)
+    text = _DASH_WS.sub("-", text)
+    text = _A_SPACE.sub("A", text)
+    return text
+
+
 # ── Paragraph-id extraction ─────────────────────────────────────────────────
 def extract_paragraph_id(text: str, *, style_id: str) -> tuple[str | None, str, bool]:
     """Return ``(paragraph_id, remaining_text, is_application_guidance)``.
@@ -106,8 +152,13 @@ def extract_paragraph_id(text: str, *, style_id: str) -> tuple[str | None, str, 
 
 
 def extract_cross_refs(text: str) -> list[str]:
-    """Collect every ``문단 N`` reference target in the paragraph."""
-    return [m.group("target") for m in CROSS_REF.finditer(normalize(text))]
+    """Collect every ``문단 N`` reference target in the paragraph.
+
+    The paragraph is NFKC-normalized and then passed through
+    :func:`_normalize_ref_text` so dash variants, the ``의`` particle, and
+    stray whitespace inside ranges do not cause misses.
+    """
+    return [m.group("target") for m in CROSS_REF.finditer(_normalize_ref_text(normalize(text)))]
 
 
 # ── Compound reference expansion ────────────────────────────────────────────
@@ -141,13 +192,18 @@ def _expand_range(start: str, end: str) -> list[str]:
                 return [f"{prefix}{ms.group('num')}({chr(c)})" for c in range(ord(a), ord(b) + 1)]
     if ms is None or me is None:
         return [start, end]
+    # Prefix-omitted end (e.g. "A38-40"): the translator dropped the "A"
+    # because the range context makes it unambiguous. Inherit the start
+    # prefix before comparing, so this expands as a same-prefix range.
+    start_prefix = ms.group("prefix")
+    end_prefix = me.group("prefix") or start_prefix
     # Mixed-prefix ranges (A22-B3 …) aren't expandable with decimal logic.
-    if ms.group("prefix") != me.group("prefix"):
+    if start_prefix != end_prefix:
         return [start, end]
     # If both sides have paren sub-items and their numeric parts match,
     # walk the paren letters: "12(a)-(c)" → 12(a), 12(b), 12(c).
     if ms.group("num") == me.group("num") and ms.group("paren") and me.group("paren"):
-        prefix = ms.group("prefix") or ""
+        prefix = start_prefix or ""
         a, b = ms.group("paren"), me.group("paren")
         if a <= b:
             return [f"{prefix}{ms.group('num')}({chr(c)})" for c in range(ord(a), ord(b) + 1)]
@@ -159,7 +215,7 @@ def _expand_range(start: str, end: str) -> list[str]:
         return [start, end]
     if s > e:
         return [start, end]
-    prefix = ms.group("prefix") or ""
+    prefix = start_prefix or ""
     suffix = ms.group("suffix") or ""
     return [f"{prefix}{n}{suffix}" for n in range(s, e + 1)]
 

@@ -214,8 +214,8 @@ def upsert(
 
     with psycopg.connect(dsn) as conn:
         ensure_schema(conn, embedder.dim)
-        n = upsert_chunks(conn, chunks, vectors)
-    console.print(f"[green]upsert[/] {n} rows")
+        n = upsert_chunks(conn, chunks, vectors, embed_model=embedder.model)
+    console.print(f"[green]upsert[/] {n} rows (model: {embedder.model})")
 
 
 @app.command()

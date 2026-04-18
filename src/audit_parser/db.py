@@ -4,6 +4,26 @@ The schema is applied idempotently on connection open so CLI callers don't
 need a separate migration step for the first run. If the stored ``dim``
 differs from what the caller passes, we raise instead of silently
 reindexing — that's an operator decision.
+
+MIGRATION NOTE: ``_create_schema_sql`` is designed for a fresh database.
+If an existing ``audit_chunks`` table was built without ``embed_model``,
+``is_toc``, or ``updated_at``, the ``CREATE TABLE IF NOT EXISTS`` will skip
+silently and subsequent INSERTs will fail on the NOT NULL constraint.
+In that case run manually (backfill embed_model with the model actually used
+for existing rows before re-enforcing NOT NULL):
+    ALTER TABLE audit_chunks
+        ADD COLUMN is_toc      BOOLEAN     NOT NULL DEFAULT FALSE,
+        ADD COLUMN embed_model TEXT        NOT NULL,
+        ADD COLUMN updated_at  TIMESTAMPTZ NOT NULL DEFAULT now();
+
+MODEL COEXISTENCE: ``chunk_id`` is the PRIMARY KEY and does NOT include
+``embed_model`` (see ``chunk._chunk_id``). Re-running ``upsert_chunks`` with
+a different ``embed_model`` for the same content therefore **overwrites** the
+previous embedding via ON CONFLICT (chunk_id). The ``UNIQUE (source_path,
+content_hash, embed_model)`` constraint and the ``audit_chunks_embed_model_idx``
+index are provisioned for a future scheme that widens ``chunk_id`` to carry
+the model, enabling side-by-side A/B embeddings. Today they only help with
+operator-driven ``DELETE WHERE embed_model = '<old>'`` cleanup.
 """
 
 from __future__ import annotations
@@ -40,33 +60,40 @@ def _create_schema_sql(dim: int) -> str:
     CREATE EXTENSION IF NOT EXISTS vector;
 
     CREATE TABLE IF NOT EXISTS audit_chunks (
-        chunk_id TEXT PRIMARY KEY,
-        isa_no TEXT NOT NULL,
-        isa_title TEXT NOT NULL,
-        section TEXT NOT NULL,
-        heading_trail TEXT[] NOT NULL,
-        paragraph_ids TEXT[] NOT NULL,
+        chunk_id        TEXT PRIMARY KEY,
+        isa_no          TEXT NOT NULL,
+        isa_title       TEXT NOT NULL,
+        section         TEXT NOT NULL,
+        heading_trail   TEXT[] NOT NULL DEFAULT '{{}}',
+        paragraph_ids   TEXT[] NOT NULL DEFAULT '{{}}',
         is_application_guidance BOOLEAN NOT NULL DEFAULT FALSE,
-        is_appendix BOOLEAN NOT NULL DEFAULT FALSE,
-        text TEXT NOT NULL,
-        char_count INTEGER NOT NULL,
-        source_path TEXT NOT NULL,
-        content_hash CHAR(64) NOT NULL,
-        refs TEXT[] NOT NULL DEFAULT '{{}}',
-        embedding vector({dim}) NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-        UNIQUE (source_path, content_hash)
+        is_appendix     BOOLEAN NOT NULL DEFAULT FALSE,
+        is_toc          BOOLEAN NOT NULL DEFAULT FALSE,
+        text            TEXT NOT NULL,
+        char_count      INTEGER NOT NULL,
+        source_path     TEXT NOT NULL,
+        content_hash    CHAR(64) NOT NULL,
+        refs            TEXT[] NOT NULL DEFAULT '{{}}',
+        embedding       vector({dim}) NOT NULL,
+        embed_model     TEXT NOT NULL,
+        created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+        CONSTRAINT uq_source_hash_model UNIQUE (source_path, content_hash, embed_model)
     );
 
     CREATE INDEX IF NOT EXISTS audit_chunks_embedding_idx
         ON audit_chunks USING hnsw (embedding vector_cosine_ops)
-        WITH (m = 16, ef_construction = 64);
+        WITH (m = 16, ef_construction = 64)
+        WHERE is_toc = FALSE;
 
     CREATE INDEX IF NOT EXISTS audit_chunks_isa_section_idx
         ON audit_chunks (isa_no, section);
 
     CREATE INDEX IF NOT EXISTS audit_chunks_paragraph_ids_idx
         ON audit_chunks USING gin (paragraph_ids);
+
+    CREATE INDEX IF NOT EXISTS audit_chunks_embed_model_idx
+        ON audit_chunks (embed_model);
     """
 
 
@@ -81,11 +108,14 @@ def upsert_chunks(
     conn: psycopg.Connection,
     chunks: Sequence[Chunk],
     vectors: Sequence[Sequence[float]],
+    *,
+    embed_model: str,
 ) -> int:
     """Upsert ``chunks`` with their embeddings. Returns rows affected.
 
-    Uses ``ON CONFLICT (chunk_id) DO UPDATE`` so re-runs refresh the row
-    (e.g. after regenerating embeddings) without creating duplicates.
+    Conflicts on ``chunk_id`` (PRIMARY KEY) and updates the embedding,
+    embed_model, and updated_at so re-runs refresh the row without
+    creating duplicates.
     """
     if len(chunks) != len(vectors):
         raise ValueError(f"chunks ({len(chunks)}) and vectors ({len(vectors)}) length mismatch")
@@ -93,23 +123,13 @@ def upsert_chunks(
     sql = """
     INSERT INTO audit_chunks (
         chunk_id, isa_no, isa_title, section, heading_trail, paragraph_ids,
-        is_application_guidance, is_appendix, text, char_count, source_path,
-        content_hash, refs, embedding
-    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        is_application_guidance, is_appendix, is_toc, text, char_count,
+        source_path, content_hash, refs, embedding, embed_model
+    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
     ON CONFLICT (chunk_id) DO UPDATE SET
-        isa_no = EXCLUDED.isa_no,
-        isa_title = EXCLUDED.isa_title,
-        section = EXCLUDED.section,
-        heading_trail = EXCLUDED.heading_trail,
-        paragraph_ids = EXCLUDED.paragraph_ids,
-        is_application_guidance = EXCLUDED.is_application_guidance,
-        is_appendix = EXCLUDED.is_appendix,
-        text = EXCLUDED.text,
-        char_count = EXCLUDED.char_count,
-        source_path = EXCLUDED.source_path,
-        content_hash = EXCLUDED.content_hash,
-        refs = EXCLUDED.refs,
-        embedding = EXCLUDED.embedding;
+        embedding   = EXCLUDED.embedding,
+        embed_model = EXCLUDED.embed_model,
+        updated_at  = now();
     """
     affected = 0
     with conn.cursor() as cur:
@@ -125,12 +145,14 @@ def upsert_chunks(
                     ch.paragraph_ids,
                     ch.is_application_guidance,
                     ch.is_appendix,
+                    False,  # is_toc: chunks are pre-filtered (is_toc=True excluded by chunker)
                     ch.text,
                     ch.char_count,
                     ch.source_path,
                     ch.content_hash,
                     ch.refs,
                     _vector_literal(vec),
+                    embed_model,
                 ),
             )
             affected += cur.rowcount
@@ -147,7 +169,7 @@ def search(
     section: str | None = None,
 ) -> list[SearchHit]:
     """Cosine-distance kNN with optional metadata filters."""
-    where_clauses: list[str] = []
+    where_clauses: list[str] = ["is_toc = FALSE"]
     params: list[object] = [_vector_literal(query_vector)]
     if isa_no is not None:
         where_clauses.append("isa_no = %s")
@@ -155,7 +177,7 @@ def search(
     if section is not None:
         where_clauses.append("section = %s")
         params.append(section)
-    where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    where_sql = f"WHERE {' AND '.join(where_clauses)}"
     params.append(top_k)
 
     sql = f"""
