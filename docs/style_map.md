@@ -179,3 +179,7 @@ Phase 2a 구현 범위에 포함:
 - `a9` (207개) 내부의 실제 numPr 분포 — numId=105/119 비율에 따라 `is_application` 상속 방향 재검토.
 - `C` 깊은 중첩의 parent 경로 — `A0→B→C` vs `A2→B0→C` 혼재 여부.
 - 각주 인라인 치환 시 `[^n]` 충돌 회피 (본문에 `[^`가 우연히 있을 경우 드물지만 escape).
+
+## 기각 기록
+
+- `14` (`toc 1`, basedOn=ad): `word/styles.xml`에는 정의되어 있으나 `word/document.xml` 본문에서 **사용 0건** — 매핑 추가 불필요. 실측일 2026-04-18.

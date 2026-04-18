@@ -1,7 +1,7 @@
 # Parsing Plan — KICPA 감사인증기준 → pgvector
 
-**상태:** 초안 · **대기:** 승인 후 Phase 2 착수
-**전제:** `docs/style_map.draft.md` 매핑이 기준점. 변경 시 본 계획 선행 업데이트.
+**상태:** Phase 1.5 + Phase 2a PR1 완료 (2026-04-18). 계획 구성은 이후 "ultraplan"에 따라 재조정되었으므로 §5 Phase Breakdown 도입부를 먼저 참조.
+**전제:** `docs/style_map.md` (Phase 1.5 확정본) 이 기준점.
 
 ---
 
@@ -158,7 +158,32 @@ CREATE INDEX ON audit_chunks USING GIN (paragraph_ids);
 
 ## 5. Phase Breakdown
 
-### Phase 2 · Loader + IR + Classifier _(파일 ≤5)_
+> **2026-04-18 개정 (ultraplan 승인본 반영).** 본 섹션의 원래 Phase 2 / 3 / 4는
+> ultraplan이 승인한 **PR1 단일 묶음** (5 files: `ir`, `styles`, `docx_reader`,
+> `numbering`, `structure`)로 병합되었습니다. 개별 승인 게이트(✅2, ✅3, ✅4)
+> 대신 **PR1 종료 시점에 도메인 전문가 시뮬레이터와의 교차검증** 하나로
+> 대체합니다. PR2 이하 phase는 원래대로 유지.
+>
+> 이 병합의 근거: (a) ir + classifier + walker + regex/numbering은 모두
+> 같은 IR 자료구조를 공유하므로 분리 구현시 API 인터페이스 공중부양이
+> 발생, (b) 도메인 전문가 교차검증이 "분류 정확도 >99%" / "상태머신 로그
+> 리뷰" / "정규식 커버리지" 3 게이트를 동시에 만족시킴.
+
+### Phase 2a PR1 · 파싱 코어 _(5 files — 완료 2026-04-18)_
+
+- `src/audit_parser/ir.py` — `Block`, `RawBlock`, `NumPr`, `NumLevel`, `AbstractNum`, `NumberingSpec`, `Standard`, `Document` dataclasses
+- `src/audit_parser/styles.py` — `STYLE_MAP` 단일 진리 원천 (style_map.md 반영)
+- `src/audit_parser/docx_reader.py` — lxml 기반 DOCX → `RawBlock[]` + footnotes + NumberingSpec
+- `src/audit_parser/numbering.py` — 정규식 fallback + numbering.xml 파서 + `NumberingCounter` (abstractNumId 키 공유)
+- `src/audit_parser/structure.py` — 상태머신 + heading stack + section 분류 + paragraph_id walker
+
+**검증 결과:**
+- 36 ISAs 인식, 851 footnotes, 74 tables
+- paragraph_id 커버리지: a1 (요구사항 본문) 97.1%, A (적용지침 본문) 94.0%
+- 25 ISA × golden first-requirement-id 테이블 교차검증 PASS
+- pytest 95 / ruff 0 에러
+
+### Phase 2 (원안) · Loader + IR + Classifier _(파일 ≤5) — ultraplan에 의해 PR1로 병합_
 
 - `src/audit_parser/ir.py` — `Block` dataclass
 - `src/audit_parser/loader/docx.py` — python-docx + lxml 기반 로더

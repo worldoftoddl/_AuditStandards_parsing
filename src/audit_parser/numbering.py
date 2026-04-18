@@ -1,0 +1,354 @@
+"""Paragraph-id extraction, cross-reference detection, dash normalization.
+
+All regexes are compiled once at import time and constrained to match at the
+start of a paragraph (paragraph_id) or anywhere (cross_ref).
+
+Rationale for the shapes here is in ``docs/style_map.md`` §"paragraph_id 정규식".
+"""
+
+from __future__ import annotations
+
+import re
+import unicodedata
+import zipfile
+from pathlib import Path
+from typing import Final
+
+from lxml import etree
+
+from .ir import AbstractNum, NumberingSpec, NumLevel, NumPr
+
+_WNS: Final[str] = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _w(tag: str) -> str:
+    return f"{{{_WNS}}}{tag}"
+
+
+# ── Regex building blocks ───────────────────────────────────────────────────
+# Paragraph-id grammar: digits, optional "-digits" range, optional alpha suffix,
+# optional "(lowercase)" sub-item. e.g. "14", "14A", "1-2", "13(f)", "A24-A26".
+_ID_BODY: Final[str] = r"\d+(?:-\d+)?(?:[A-Za-z])?(?:\([a-z]\))?"
+
+REQ_ID: Final[re.Pattern[str]] = re.compile(
+    rf"^(?P<id>{_ID_BODY})(?:\.\s+|\s+)(?P<rest>.*)$",
+    re.UNICODE | re.DOTALL,
+)
+APP_ID: Final[re.Pattern[str]] = re.compile(
+    rf"^A(?P<id>{_ID_BODY})(?:\.\s+|\s+)(?P<rest>.*)$",
+    re.UNICODE | re.DOTALL,
+)
+# Cross-references may span a range with matching/mixed prefixes: "문단 A24-A26"
+# or "문단 12-14". Capture the whole range as the target.
+CROSS_REF: Final[re.Pattern[str]] = re.compile(
+    rf"문단\s+(?P<target>A?{_ID_BODY}(?:-A?{_ID_BODY})?)",
+    re.UNICODE,
+)
+
+# Standard header: "감사기준서 200 독립된 감사인의 …"
+STANDARD_HEADER: Final[re.Pattern[str]] = re.compile(
+    r"^감사기준서\s+(?P<no>\d{3})(?:호)?\s+(?P<title>.+)$",
+    re.UNICODE,
+)
+
+# Appendix title: "보론 1 (문단 A24-A26 참조) 감사계약서의 예시"
+APPENDIX_TITLE: Final[re.Pattern[str]] = re.compile(
+    r"^보론\s*(?P<n>\d+)?\s*\(문단\s+A?\d+(?:-A?\d+)?\s*참조\)\s*(?P<title>.+)$",
+    re.UNICODE,
+)
+
+# TOC line: "title\t…\tpages" or "title   pages" (2+ spaces). Pages may be
+# "12" or "12-15".
+TOC_LINE: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<title>.+?)(?:\t+|\s{2,})(?P<pages>\d+(?:-\d+)?)\s*$",
+    re.UNICODE,
+)
+
+# Dash variants U+2010..U+2015 plus the ASCII hyphen, surrounded by whitespace.
+DASH_SPLIT: Final[re.Pattern[str]] = re.compile(
+    r"\s[\u2010-\u2015\-]\s",
+    re.UNICODE,
+)
+
+
+# ── Text normalization ──────────────────────────────────────────────────────
+def normalize(text: str) -> str:
+    """NFKC-normalize a paragraph before regex matching."""
+    return unicodedata.normalize("NFKC", text)
+
+
+# ── Paragraph-id extraction ─────────────────────────────────────────────────
+def extract_paragraph_id(text: str, *, style_id: str) -> tuple[str | None, str, bool]:
+    """Return ``(paragraph_id, remaining_text, is_application_guidance)``.
+
+    The regex applied is determined by the style: ``A`` / ``A0`` use ``APP_ID``,
+    everything else uses ``REQ_ID``. Failure to match returns the input text
+    unchanged with ``paragraph_id=None``.
+
+    ``is_application_guidance`` is returned independently from ``style_id``:
+    callers should rely on the style's semantic mapping, but it is convenient
+    to surface here so structure.py can double-check.
+    """
+    norm = normalize(text)
+    prefer_app = style_id in {"A", "A0"}
+    patterns = (APP_ID, REQ_ID) if prefer_app else (REQ_ID, APP_ID)
+    for pat in patterns:
+        m = pat.match(norm)
+        if m:
+            pid = m.group("id")
+            if pat is APP_ID:
+                pid = f"A{pid}"
+                is_app = True
+            else:
+                is_app = False
+            return pid, m.group("rest"), is_app
+    return None, norm, prefer_app
+
+
+def extract_cross_refs(text: str) -> list[str]:
+    """Collect every ``문단 N`` reference target in the paragraph."""
+    return [m.group("target") for m in CROSS_REF.finditer(normalize(text))]
+
+
+def match_standard_header(text: str) -> tuple[str, str] | None:
+    """Parse a `10`-style heading text into ``(isa_no, title)``."""
+    m = STANDARD_HEADER.match(normalize(text))
+    if not m:
+        return None
+    return m.group("no"), m.group("title").strip()
+
+
+def match_appendix_title(text: str) -> tuple[str | None, str] | None:
+    """Parse an `aff3` heading into ``(appendix_number, title)``."""
+    m = APPENDIX_TITLE.match(normalize(text))
+    if not m:
+        return None
+    return m.group("n"), m.group("title").strip()
+
+
+def match_toc_line(text: str) -> tuple[str, str] | None:
+    """Split a TOC entry into ``(title, pages)``; returns None for non-TOC."""
+    m = TOC_LINE.match(normalize(text))
+    if not m:
+        return None
+    return m.group("title").strip(), m.group("pages")
+
+
+# ── Term – definition split (for style A2) ──────────────────────────────────
+_MAX_TERM_LEN: Final[int] = 20  # empirically A2 terms are 4–15 chars; 20 gives headroom
+
+
+def split_definition(text: str) -> tuple[str, str] | None:
+    """Split "term – definition" into parts; return None if not a definition.
+
+    Guards:
+    - Require a dash flanked by whitespace (``DASH_SPLIT``).
+    - Only the first dash splits — paragraphs often contain additional dashes.
+    - If the term portion is too long, assume this is prose with an em-dash,
+      not a definition. Fall back to None so the caller treats it as body.
+    """
+    norm = normalize(text)
+    parts = DASH_SPLIT.split(norm, maxsplit=1)
+    if len(parts) != 2:
+        return None
+    term, defn = parts[0].strip(), parts[1].strip()
+    if not term or not defn:
+        return None
+    if len(term) > _MAX_TERM_LEN:
+        return None
+    return term, defn
+
+
+# ── numbering.xml parsing ───────────────────────────────────────────────────
+def _parse_style_defaults(z: zipfile.ZipFile) -> dict[str, NumPr]:
+    """Return ``{style_id: NumPr}`` from ``word/styles.xml``.
+
+    Only styles that declare a ``pPr/numPr`` with a ``numId`` are included,
+    because that's what paragraphs inherit when they don't override numbering.
+    """
+    try:
+        with z.open("word/styles.xml") as f:
+            tree = etree.parse(f)
+    except KeyError:
+        return {}
+    out: dict[str, NumPr] = {}
+    for style in tree.getroot().findall(_w("style")):
+        sid = style.get(_w("styleId"))
+        ppr = style.find(_w("pPr"))
+        if sid is None or ppr is None:
+            continue
+        npr = ppr.find(_w("numPr"))
+        if npr is None:
+            continue
+        nid_el = npr.find(_w("numId"))
+        il_el = npr.find(_w("ilvl"))
+        num_id = nid_el.get(_w("val")) if nid_el is not None else None
+        ilvl = il_el.get(_w("val")) if il_el is not None else None
+        if num_id is None and ilvl is None:
+            continue
+        out[sid] = NumPr(num_id=num_id, ilvl=ilvl)
+    return out
+
+
+def parse_numbering_xml(docx_path: Path) -> NumberingSpec:
+    """Load ``word/numbering.xml`` and ``word/styles.xml`` numPr defaults.
+
+    Missing files yield an empty spec section for that aspect.
+    """
+    with zipfile.ZipFile(docx_path) as z:
+        style_defaults = _parse_style_defaults(z)
+        try:
+            with z.open("word/numbering.xml") as f:
+                tree = etree.parse(f)
+        except KeyError:
+            return NumberingSpec(num_to_abs={}, abstracts={}, style_defaults=style_defaults)
+
+    root = tree.getroot()
+    num_to_abs: dict[str, str] = {}
+    for n in root.findall(_w("num")):
+        nid = n.get(_w("numId"))
+        abs_el = n.find(_w("abstractNumId"))
+        if nid is None or abs_el is None:
+            continue
+        abs_id = abs_el.get(_w("val"))
+        if abs_id is not None:
+            num_to_abs[nid] = abs_id
+
+    abstracts: dict[str, AbstractNum] = {}
+    for a in root.findall(_w("abstractNum")):
+        abs_id = a.get(_w("abstractNumId"))
+        if abs_id is None:
+            continue
+        levels: list[NumLevel] = []
+        for lvl in a.findall(_w("lvl")):
+            try:
+                ilvl = int(lvl.get(_w("ilvl"), "0"))
+            except ValueError:
+                continue
+            fmt_el = lvl.find(_w("numFmt"))
+            text_el = lvl.find(_w("lvlText"))
+            start_el = lvl.find(_w("start"))
+            num_fmt = fmt_el.get(_w("val"), "decimal") if fmt_el is not None else "decimal"
+            lvl_text = text_el.get(_w("val"), "") if text_el is not None else ""
+            try:
+                start = int(start_el.get(_w("val"), "1")) if start_el is not None else 1
+            except ValueError:
+                start = 1
+            levels.append(NumLevel(ilvl=ilvl, num_fmt=num_fmt, lvl_text=lvl_text, start=start))
+        abstracts[abs_id] = AbstractNum(abs_id=abs_id, levels=tuple(levels))
+    return NumberingSpec(num_to_abs=num_to_abs, abstracts=abstracts, style_defaults=style_defaults)
+
+
+# ── Number rendering ────────────────────────────────────────────────────────
+_ROMAN_UNITS: Final[tuple[str, ...]] = (
+    "",
+    "i",
+    "ii",
+    "iii",
+    "iv",
+    "v",
+    "vi",
+    "vii",
+    "viii",
+    "ix",
+    "x",
+    "xi",
+    "xii",
+    "xiii",
+    "xiv",
+    "xv",
+    "xvi",
+    "xvii",
+    "xviii",
+    "xix",
+    "xx",
+    "xxi",
+    "xxii",
+    "xxiii",
+    "xxiv",
+    "xxv",
+    "xxvi",
+    "xxvii",
+    "xxviii",
+    "xxix",
+    "xxx",
+)
+
+
+def _fmt_value(num_fmt: str, n: int) -> str:
+    if n <= 0:
+        return ""
+    if num_fmt == "decimal":
+        return str(n)
+    if num_fmt == "lowerLetter":
+        # 1=a, 2=b, …, 26=z, 27=aa
+        if n <= 26:
+            return chr(ord("a") + n - 1)
+        q, r = divmod(n - 1, 26)
+        return chr(ord("a") + q - 1) + chr(ord("a") + r)
+    if num_fmt == "upperLetter":
+        if n <= 26:
+            return chr(ord("A") + n - 1)
+        q, r = divmod(n - 1, 26)
+        return chr(ord("A") + q - 1) + chr(ord("A") + r)
+    if num_fmt == "lowerRoman":
+        return _ROMAN_UNITS[n] if n < len(_ROMAN_UNITS) else str(n)
+    if num_fmt == "upperRoman":
+        return (_ROMAN_UNITS[n].upper()) if n < len(_ROMAN_UNITS) else str(n)
+    if num_fmt == "bullet":
+        return ""
+    # Unknown format: fall back to decimal.
+    return str(n)
+
+
+class NumberingCounter:
+    """Stateful counter for DOCX automatic numbering.
+
+    Keyed by ``abstractNumId`` (not ``numId``): Word creates many ``numId``
+    instances that all point at the same abstract; sharing counters across
+    them matches the rendered output. Within an abstract, maintains a
+    per-``ilvl`` counter. Advancing ``ilvl=N`` resets deeper counters.
+    Call :meth:`reset_all` at document boundaries (e.g. ISA transitions).
+    """
+
+    def __init__(self, spec: NumberingSpec) -> None:
+        self._spec = spec
+        # abstract_id → list[int] indexed by ilvl.
+        self._state: dict[str, list[int]] = {}
+
+    def reset_all(self) -> None:
+        self._state.clear()
+
+    def advance(self, num_id: str, ilvl: int) -> str:
+        """Advance ``(numId→abstract, ilvl)`` and return the rendered number."""
+        abs_id = self._spec.num_to_abs.get(num_id)
+        if abs_id is None:
+            return ""
+        ab = self._spec.abstracts.get(abs_id)
+        if ab is None:
+            return ""
+        level = ab.level(ilvl)
+        if level is None:
+            return ""
+
+        counters = self._state.setdefault(abs_id, [])
+        while len(counters) <= ilvl:
+            counters.append(0)
+        for deeper in range(ilvl + 1, len(counters)):
+            counters[deeper] = 0
+        if counters[ilvl] == 0:
+            counters[ilvl] = level.start
+        else:
+            counters[ilvl] += 1
+
+        if level.num_fmt == "bullet":
+            return ""
+
+        out = level.lvl_text
+        for placeholder_ilvl in range(ilvl + 1):
+            placeholder = f"%{placeholder_ilvl + 1}"
+            v_level = ab.level(placeholder_ilvl)
+            v_fmt = v_level.num_fmt if v_level is not None else "decimal"
+            n = counters[placeholder_ilvl] if placeholder_ilvl < len(counters) else 0
+            out = out.replace(placeholder, _fmt_value(v_fmt, n))
+        return out
