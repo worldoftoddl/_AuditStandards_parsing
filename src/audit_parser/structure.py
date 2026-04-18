@@ -95,6 +95,11 @@ def build_document(
     doc = Document(source_path=source_path, footnotes=footnotes)
     current_std: Standard | None = None
     source_stem = source_path.stem
+    # Tracks the most-recent numbered body-ish block in the current section,
+    # used to link continuation blocks. Keyed by (isa_ordinal, section).
+    last_numbered_block_id: str | None = None
+    last_numbered_section: str | None = None
+    last_numbered_isa_ordinal: int = -1
 
     for raw in raw_blocks:
         info = STYLE_MAP.get(raw.style_id)
@@ -218,6 +223,24 @@ def build_document(
         # ── Cross-refs ──
         refs = extract_cross_refs(text)
 
+        # ── Continuation linking ──
+        current_isa_ordinal = len(doc.standards) - 1  # resets on each new ISA
+        continuation_of: str | None = None
+        is_bodyish = kind in (
+            "paragraph_body",
+            "paragraph_list_item",
+            "paragraph_definition",
+        )
+        if (
+            is_bodyish
+            and not is_toc
+            and paragraph_id is None
+            and last_numbered_block_id is not None
+            and last_numbered_isa_ordinal == current_isa_ordinal
+            and last_numbered_section == section
+        ):
+            continuation_of = last_numbered_block_id
+
         block = Block(
             block_id=f"{source_stem}#{raw.ordinal:05d}",
             source_path=source_path,
@@ -236,11 +259,21 @@ def build_document(
             refs=refs,
             footnote_ids=list(raw.footnote_ids),
             table_rows=list(raw.table_rows),
+            continuation_of=continuation_of,
         )
 
         if current_std is None:
             doc.preamble.append(block)
         else:
             current_std.blocks.append(block)
+
+        # Update continuation anchor after the block is saved.
+        if is_bodyish and not is_toc and paragraph_id is not None:
+            last_numbered_block_id = block.block_id
+            last_numbered_section = section
+            last_numbered_isa_ordinal = current_isa_ordinal
+        elif kind.startswith("heading_"):
+            # Headings break continuation — next block starts fresh.
+            last_numbered_block_id = None
 
     return doc

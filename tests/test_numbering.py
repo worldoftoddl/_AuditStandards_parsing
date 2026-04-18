@@ -3,6 +3,7 @@
 from audit_parser.ir import AbstractNum, NumberingSpec, NumLevel
 from audit_parser.numbering import (
     NumberingCounter,
+    expand_cross_refs,
     extract_cross_refs,
     extract_paragraph_id,
     match_appendix_title,
@@ -10,6 +11,38 @@ from audit_parser.numbering import (
     match_toc_line,
     split_definition,
 )
+
+
+class TestExpandCrossRefs:
+    def test_simple_passthrough(self):
+        assert expand_cross_refs(["A22"]) == ["A22"]
+
+    def test_compound_wa(self):
+        assert expand_cross_refs(["A22와 A28"]) == ["A22", "A28"]
+
+    def test_compound_comma(self):
+        assert expand_cross_refs(["A63, A84"]) == ["A63", "A84"]
+
+    def test_numeric_range(self):
+        assert expand_cross_refs(["A20-A22"]) == ["A20", "A21", "A22"]
+
+    def test_paren_range(self):
+        assert expand_cross_refs(["12(a)-(c)"]) == ["12(a)", "12(b)", "12(c)"]
+
+    def test_range_and_list_mixed(self):
+        got = expand_cross_refs(["A20-A22", "A63", "A84"])
+        assert got == ["A20", "A21", "A22", "A63", "A84"]
+
+    def test_dedup_order_preserved(self):
+        got = expand_cross_refs(["A22", "A20-A22"])
+        assert got == ["A22", "A20", "A21"]
+
+    def test_descending_range_kept_as_is(self):
+        assert expand_cross_refs(["A22-A20"]) == ["A22", "A20"]
+
+    def test_mixed_prefix_range_kept_as_is(self):
+        # prefix mismatch is not expanded
+        assert expand_cross_refs(["A22-B3"]) == ["A22", "B3"]
 
 
 # ── Paragraph id regex ─────────────────────────────────────────────────────

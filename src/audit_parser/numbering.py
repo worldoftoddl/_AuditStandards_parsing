@@ -110,6 +110,91 @@ def extract_cross_refs(text: str) -> list[str]:
     return [m.group("target") for m in CROSS_REF.finditer(normalize(text))]
 
 
+# ── Compound reference expansion ────────────────────────────────────────────
+# After ``extract_cross_refs`` collects raw targets, callers often need to
+# (a) split compound forms like "A22와 A28" → ["A22", "A28"], and (b) expand
+# numeric ranges like "A20-A22" → ["A20", "A21", "A22"].
+# Ranges that mix alpha prefixes differently (e.g. "A22-B3" if it ever existed)
+# are left as-is.
+_COMPOUND_SPLIT: Final[re.Pattern[str]] = re.compile(r"\s*[,、와과및]\s*", re.UNICODE)
+_REF_PARTS: Final[re.Pattern[str]] = re.compile(
+    r"^(?P<prefix>A)?(?P<num>\d+)(?P<suffix>[A-Za-z])?"
+    r"(?:\((?P<paren>[a-z])\))?$",
+    re.UNICODE,
+)
+# Matches bare "(x)" used as range-end shorthand: "12(a)-(c)".
+_PAREN_ONLY: Final[re.Pattern[str]] = re.compile(r"^\((?P<paren>[a-z])\)$", re.UNICODE)
+
+
+def _expand_range(start: str, end: str) -> list[str]:
+    """Expand ``start-end`` into the list of ids it covers. Returns
+    ``[start, end]`` unchanged if the shape is not enumerable."""
+    ms = _REF_PARTS.match(start)
+    me = _REF_PARTS.match(end)
+    # Shorthand: "12(a)-(c)" — end is bare "(x)", inherits prefix/num from start.
+    if ms is not None and me is None:
+        po = _PAREN_ONLY.match(end)
+        if po is not None and ms.group("paren"):
+            a, b = ms.group("paren"), po.group("paren")
+            if a <= b:
+                prefix = ms.group("prefix") or ""
+                return [f"{prefix}{ms.group('num')}({chr(c)})" for c in range(ord(a), ord(b) + 1)]
+    if ms is None or me is None:
+        return [start, end]
+    # Mixed-prefix ranges (A22-B3 …) aren't expandable with decimal logic.
+    if ms.group("prefix") != me.group("prefix"):
+        return [start, end]
+    # If both sides have paren sub-items and their numeric parts match,
+    # walk the paren letters: "12(a)-(c)" → 12(a), 12(b), 12(c).
+    if ms.group("num") == me.group("num") and ms.group("paren") and me.group("paren"):
+        prefix = ms.group("prefix") or ""
+        a, b = ms.group("paren"), me.group("paren")
+        if a <= b:
+            return [f"{prefix}{ms.group('num')}({chr(c)})" for c in range(ord(a), ord(b) + 1)]
+        return [start, end]
+    # Otherwise expand the numeric parts.
+    try:
+        s, e = int(ms.group("num")), int(me.group("num"))
+    except ValueError:
+        return [start, end]
+    if s > e:
+        return [start, end]
+    prefix = ms.group("prefix") or ""
+    suffix = ms.group("suffix") or ""
+    return [f"{prefix}{n}{suffix}" for n in range(s, e + 1)]
+
+
+def expand_cross_refs(raw_refs: list[str]) -> list[str]:
+    """Given the raw strings from :func:`extract_cross_refs`, split compounds
+    and expand simple ranges. Duplicates are removed while preserving order.
+
+    Examples:
+        >>> expand_cross_refs(["A22", "A28"])
+        ['A22', 'A28']
+        >>> expand_cross_refs(["A20-A22"])
+        ['A20', 'A21', 'A22']
+        >>> expand_cross_refs(["12(a)-(c)"])
+        ['12(a)', '12(b)', '12(c)']
+    """
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_refs:
+        for piece in _COMPOUND_SPLIT.split(raw):
+            piece = piece.strip()
+            if not piece:
+                continue
+            if "-" in piece:
+                lo, sep, hi = piece.rpartition("-")
+                expanded = _expand_range(lo, hi) if sep and lo and hi else [piece]
+            else:
+                expanded = [piece]
+            for item in expanded:
+                if item not in seen:
+                    seen.add(item)
+                    out.append(item)
+    return out
+
+
 def match_standard_header(text: str) -> tuple[str, str] | None:
     """Parse a `10`-style heading text into ``(isa_no, title)``."""
     m = STANDARD_HEADER.match(normalize(text))

@@ -136,6 +136,30 @@ class Block:
     # only for kind == "table"
     table_rows: list[list[str]] = field(default_factory=list)
 
+    # Continuation link: for body/list_item blocks without an own paragraph_id
+    # that semantically extend the most-recent numbered body block in the same
+    # section. The chunker uses this to merge continuations into the parent.
+    continuation_of: str | None = None
+
+
+@dataclass
+class Chunk:
+    """Retrieval-ready chunk. Produced by chunk.py from Block(s)."""
+
+    chunk_id: str  # f"{isa_no}:{paragraph_id}" or hash-based for merges
+    isa_no: str  # "200","210", …; "" for preamble
+    isa_title: str
+    section: str  # intro/objective/definitions/requirements/application/appendix/other
+    heading_trail: list[str]
+    paragraph_ids: list[str]  # possibly merged
+    is_application_guidance: bool
+    is_appendix: bool
+    text: str  # final embed target — may include heading_trail prefix
+    char_count: int
+    source_path: str  # relative / str repr
+    content_hash: str  # SHA-256 of `text`
+    refs: list[str] = field(default_factory=list)  # expanded cross-ref ids
+
 
 @dataclass
 class Standard:
