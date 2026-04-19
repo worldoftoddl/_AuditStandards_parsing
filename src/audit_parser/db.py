@@ -24,6 +24,11 @@ content_hash, embed_model)`` constraint and the ``audit_chunks_embed_model_idx``
 index are provisioned for a future scheme that widens ``chunk_id`` to carry
 the model, enabling side-by-side A/B embeddings. Today they only help with
 operator-driven ``DELETE WHERE embed_model = '<old>'`` cleanup.
+
+A/B EVAL: During Task #3 retrieval eval, a temporary table
+``audit_chunks_eval_upstage`` (vector(4096)) stores Upstage solar embeddings
+for the same eval subset alongside the primary BGE-M3 embeddings here.
+That table is dropped after eval completes — it is not managed by this module.
 """
 
 from __future__ import annotations
@@ -74,7 +79,7 @@ def _create_schema_sql(dim: int) -> str:
         source_path     TEXT NOT NULL,
         content_hash    CHAR(64) NOT NULL,
         refs            TEXT[] NOT NULL DEFAULT '{{}}',
-        embedding       vector({dim}) NOT NULL,
+        embedding       vector({dim}) NOT NULL,  -- BGE-M3 default: dim=1024
         embed_model     TEXT NOT NULL,
         created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
         updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),

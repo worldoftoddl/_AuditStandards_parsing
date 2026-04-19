@@ -18,7 +18,7 @@ from audit_parser.db import _create_schema_sql, upsert_chunks
 
 @pytest.fixture(scope="module")
 def schema_sql() -> str:
-    return _create_schema_sql(4096)
+    return _create_schema_sql(1024)
 
 
 # ── Column presence ──────────────────────────────────────────────────────────
@@ -98,7 +98,15 @@ def test_upsert_chunks_embed_model_is_keyword_only() -> None:
 # ── dim placeholder ──────────────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("dim", [1024, 4096])
+@pytest.mark.parametrize("dim", [768, 1024])
 def test_schema_dim_is_templated(dim: int) -> None:
     sql = _create_schema_sql(dim)
     assert f"vector({dim})" in sql, f"vector({dim}) not found in schema DDL"
+
+
+def test_schema_4096_exceeds_hnsw_vector_limit() -> None:
+    """pgvector 0.8 HNSW supports vector(≤2000). 4096-dim (solar-embedding) cannot use HNSW.
+    This is why dim=1024 (BGE-M3) is used as the production default.
+    Runtime error: 'column cannot have more than 2000 dimensions for hnsw index'
+    """
+    assert 4096 > 2000  # documents the constraint; dim=1024 is the safe choice

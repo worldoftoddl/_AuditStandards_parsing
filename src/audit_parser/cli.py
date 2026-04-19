@@ -43,6 +43,34 @@ app = typer.Typer(help="KICPA 감사인증기준 DOCX → pgvector pipeline")
 console = Console()
 
 
+def _resolve_dsn(explicit: str | None) -> str:
+    """Return a Postgres DSN in precedence order:
+    explicit CLI flag > PG_DSN env > assembled PG_HOST/PORT/DATABASE/USER/PASSWORD.
+
+    User and password are URL-quoted so ``@``, ``:``, ``/``, or non-ASCII
+    characters in secrets do not break the DSN.
+    """
+    from urllib.parse import quote
+
+    if explicit:
+        return explicit
+    dsn = os.environ.get("PG_DSN")
+    if dsn:
+        return dsn
+    host = os.environ.get("PG_HOST")
+    db = os.environ.get("PG_DATABASE")
+    user = os.environ.get("PG_USER")
+    if not (host and db and user):
+        raise typer.BadParameter(
+            "No DSN configured. Set --dsn, PG_DSN, or PG_HOST/PG_DATABASE/PG_USER."
+        )
+    port = os.environ.get("PG_PORT", "5432")
+    password = os.environ.get("PG_PASSWORD", "")
+    user_q = quote(user, safe="")
+    auth = f"{user_q}:{quote(password, safe='')}" if password else user_q
+    return f"postgresql://{auth}@{host}:{port}/{db}"
+
+
 # ── Serialization helpers ───────────────────────────────────────────────────
 def _block_to_dict(b: Block) -> dict:
     d = dataclasses.asdict(b)
@@ -193,7 +221,11 @@ def upsert(
     chunks_jsonl: Annotated[Path, typer.Argument()] = Path("parsed/chunks.jsonl"),
     cache_path: Annotated[Path, typer.Option()] = Path(".embed_cache.sqlite"),
     dsn: Annotated[
-        str | None, typer.Option("--dsn", help="Postgres DSN; defaults to PG_DSN env")
+        str | None,
+        typer.Option(
+            "--dsn",
+            help="Postgres DSN; defaults to PG_DSN env or PG_HOST/PG_DATABASE/PG_USER trio",
+        ),
     ] = None,
 ) -> None:
     """Upsert chunks + embeddings into pgvector."""
@@ -201,9 +233,7 @@ def upsert(
 
     from .db import ensure_schema, upsert_chunks
 
-    dsn = dsn or os.environ.get("PG_DSN")
-    if not dsn:
-        raise typer.BadParameter("--dsn or PG_DSN is required")
+    dsn = _resolve_dsn(dsn)
 
     chunks = _load_chunks(chunks_jsonl)
     embedder = UpstageEmbedder()
@@ -231,10 +261,7 @@ def search(
 
     from .db import search as db_search
 
-    dsn = dsn or os.environ.get("PG_DSN")
-    if not dsn:
-        raise typer.BadParameter("--dsn or PG_DSN is required")
-
+    dsn = _resolve_dsn(dsn)
     embedder = UpstageEmbedder(passage_model=DEFAULT_QUERY_MODEL)
     qvec = embedder.embed_query(query)
     with psycopg.connect(dsn) as conn:

@@ -1,0 +1,384 @@
+# KICPA 감사기준(ISA) 검색 평가용 쿼리 세트
+# -------------------------------------------------
+# - 카테고리: requirements / application / cross-standard / definitions
+# - chunk_id 포맷: "{isa_no}:{paragraph_id}"  (예: "200:13", "315:(l)")
+# - sub-item((a),(b),(i) 등)은 ISA 내에서 재등장하므로, 본 파일에서는
+#   "logical_path" (예: "315:12.(l)") 로 병기하고, 평가 하네스에서
+#   바로 앞의 parent paragraph(top-level 숫자 id) 다음 첫 매치로 해석함.
+#   README.md 의 "chunk_id 해석 규약" 섹션 참조.
+# - expected_primary_chunks: top-1/top-3 에 반드시 들어와야 하는 정답 chunk
+# - expected_related_chunks: top-10 에 들어오면 가산(보조 맥락). 누락해도 recall 감점 없음.
+# -------------------------------------------------
+
+version: 1
+total_queries: 26
+
+queries:
+
+  # =========================================================
+  # CATEGORY 1: requirements (요구사항 본문 탐색, 7건)
+  # =========================================================
+
+  - id: Q01
+    category: requirements
+    query: "감사계약의 전제조건이 성립하는지 확인하기 위해 감사인이 수행해야 하는 절차는?"
+    expected_primary_chunks:
+      - "210:6"
+    expected_related_chunks:
+      - "210:3"   # 목적
+      - "210:4"   # 전제조건 정의 인용
+      - "210:5"   # 용어의 정의
+    notes: |
+      전형적인 "요구사항" 질의. 실무자가 계약 수임 전 체크리스트 구성 시 참조.
+      ¶6 "재무보고체계의 수용가능성 + 경영진의 책임 인식" 두 요소가 핵심.
+
+  - id: Q02
+    category: requirements
+    query: "감사계약서에 반드시 포함되어야 하는 항목은 무엇인가?"
+    expected_primary_chunks:
+      - "210:10"
+    expected_related_chunks:
+      - "210:11"  # 법규에 포함사항이 규정된 경우
+      - "210:12"  # 계속감사
+    notes: |
+      ¶10 에 (a)~(e) 형태로 포함사항이 열거됨. 실무자가 계약서 템플릿 작성 시
+      가장 자주 찾는 문단. top-1 에 `210:10` 이 없으면 사실상 실패.
+
+  - id: Q03
+    category: requirements
+    query: "중요왜곡표시위험(RMM)을 식별하고 평가하기 위해 감사인이 수행하는 위험평가절차는?"
+    expected_primary_chunks:
+      - "315:13"
+      - "315:14"
+    expected_related_chunks:
+      - "315:19"   # 기업과 그 환경의 이해
+      - "315:23"   # RMM 식별 및 평가
+      - "315:26"   # 재무제표/거래 수준 RMM 평가
+    notes: |
+      실무 핵심 요구사항. ¶13(질의/관찰/분석적절차) + ¶14(분석적절차 세부)
+      가 top-3 에 동시 등장해야 함.
+
+  - id: Q04
+    category: requirements
+    query: "재무제표 전체 중요성과 수행중요성을 결정할 때 감사인의 요구사항은?"
+    expected_primary_chunks:
+      - "320:10"
+      - "320:11"
+    expected_related_chunks:
+      - "320:12"   # 감사진행 중 중요성의 수정
+      - "320:13"   # 수행중요성의 수정
+    notes: |
+      ¶10(재무제표 중요성), ¶11(수행중요성) 이 pair 로 나와야 함.
+      정의(320:9)와의 구분을 위해 "결정" 키워드 포함.
+
+  - id: Q05
+    category: requirements
+    query: "계속기업 가정에 유의적 의문을 제기하는 사건·상황에 대해 감사인이 수행해야 할 추가 감사절차는?"
+    expected_primary_chunks:
+      - "570:16"
+    expected_related_chunks:
+      - "570:10"   # 위험평가
+      - "570:17"   # 결론
+      - "570:18"   # 경영진 평가기간 이후 사건
+    notes: |
+      ¶16 (a)~(e) 형태의 구체 절차. 실무에서 continuance 문단 작성 근거.
+
+  - id: Q06
+    category: requirements
+    query: "경영진의 통제무력화 위험에 대응하기 위해 감사인이 수행해야 하는 절차는?"
+    expected_primary_chunks:
+      - "240:32"
+      - "240:33"
+    expected_related_chunks:
+      - "240:31"   # 특정 재무보고 위험에 대한 대응
+      - "240:26"   # 부정 RMM 평가
+    notes: |
+      ¶32 (분개·추정·비경상거래), ¶33 (추가절차) 가 한 쌍.
+      통제무력화(management override) 는 ISA 240 의 상징적 요구사항.
+
+  - id: Q07
+    category: requirements
+    query: "재무제표에 대해 적정의견을 표명하기 위한 조건은?"
+    expected_primary_chunks:
+      - "700:16"
+      - "700:17"
+    expected_related_chunks:
+      - "700:10"   # 의견 형성
+      - "700:11"   # 충분하고 적합한 감사증거 입수 결론
+      - "700:18"   # 변형의견
+    notes: |
+      ¶10-11 (의견형성 과정) → ¶16-17 (적정의견 요건) 의 흐름.
+      "조건"이라는 단어가 ¶16 바로 매칭.
+
+  # =========================================================
+  # CATEGORY 2: application (적용지침 - A 문단, 6건)
+  # =========================================================
+
+  - id: Q08
+    category: application
+    query: "감사계약서 작성 시 고려해야 할 세부 내용과 법규 준수 사항에 대한 구체적 지침은?"
+    expected_primary_chunks:
+      - "210:A23"
+      - "210:A24"
+    expected_related_chunks:
+      - "210:A22"   # 계약서의 형식과 내용
+      - "210:A25"   # 책임의 분리
+      - "210:A26"   # 모집단
+    notes: |
+      Q02(요구사항 ¶10)에 대응되는 적용지침. "세부 내용", "구체적 지침" 같은
+      키워드가 application 문단(A-numbered)에 hit 되는지 확인.
+
+  - id: Q09
+    category: application
+    query: "일반목적재무보고체계의 수용가능성을 판단할 때 고려할 요소는?"
+    expected_primary_chunks:
+      - "210:A8"
+      - "210:A9"
+    expected_related_chunks:
+      - "210:A4"   # 재무보고체계의 수용가능성
+      - "210:A5"
+      - "210:A10"  # 특수목적체계
+    notes: |
+      "수용가능성" 은 ¶6(b)의 전제조건 중 하나. 적용지침 A4~A10 범위.
+
+  - id: Q10
+    category: application
+    query: "전문가적 의구심을 유지한다는 것이 실무에서 어떻게 적용되어야 하는가?"
+    expected_primary_chunks:
+      - "200:A18"
+      - "200:A19"
+    expected_related_chunks:
+      - "200:A20"
+      - "200:A21"
+      - "200:A22"
+    notes: |
+      ISA 200 의 ¶15(요구사항) 에 대응되는 적용지침 A18-A22.
+      "어떻게 적용되어야 하는가" = application 의 의도적 트리거.
+
+  - id: Q11
+    category: application
+    query: "고유위험과 통제위험의 범위를 평가할 때 고려할 상황은?"
+    expected_primary_chunks:
+      - "315:A7"
+      - "315:A8"
+    expected_related_chunks:
+      - "315:A9"
+      - "315:A10"
+      - "315:A11"
+    notes: |
+      ISA 315 에서 위험평가 접근법 관련 적용지침. "범위", "상황" 이 A-문단 키워드.
+
+  - id: Q12
+    category: application
+    query: "부정위험요소(fraud risk factor)의 분류와 사례는?"
+    expected_primary_chunks:
+      - "240:A24"
+      - "240:A25"
+    expected_related_chunks:
+      - "240:A26"
+      - "240:A27"
+      - "240:A28"   # 부록1 참조 문단이 있을 수 있음
+    notes: |
+      ¶12 정의 대비 적용지침의 구체 사례. 부록1 (Appendix 1) 의 chunk 도
+      related 로 기대(있으면 가산).
+
+  - id: Q13
+    category: application
+    query: "중요성 결정의 벤치마크를 선택할 때 고려해야 할 요인은?"
+    expected_primary_chunks:
+      - "320:A4"
+      - "320:A5"
+    expected_related_chunks:
+      - "320:A6"
+      - "320:A7"
+      - "320:A8"
+    notes: |
+      ISA 320 의 대표적인 application 단락. ¶10(요구사항) 에 대한 how-to.
+
+  # =========================================================
+  # CATEGORY 3: cross-standard (복수 ISA 에 걸친 개념, 6건)
+  # =========================================================
+
+  - id: Q14
+    category: cross-standard
+    query: "중요왜곡표시위험(RMM)의 의미와 감사절차에서의 역할을 설명해줘."
+    expected_primary_chunks:
+      - "200:13"    # ¶13(n) 정의
+      - "315:23"    # 식별·평가
+      - "330:5"     # 전반적 대응
+    expected_related_chunks:
+      - "315:26"
+      - "330:6"
+      - "330:18"
+    notes: |
+      200 (정의) → 315 (평가) → 330 (대응) 의 3-step 체인이
+      top-10 에 모두 들어오는지가 가장 중요한 cross-standard test.
+
+  - id: Q15
+    category: cross-standard
+    query: "전문가적 의구심의 개념과 부정위험에의 적용"
+    expected_primary_chunks:
+      - "200:15"    # 요구사항
+      - "240:13"    # 부정에의 적용
+    expected_related_chunks:
+      - "200:13"    # ¶13(l) 정의
+      - "240:12"
+      - "240:A7"
+      - "240:A8"
+    notes: |
+      ISA 200 일반규정 + ISA 240 특수적용. definition 쿼리(Q21)와 구분을 위해
+      "개념과 적용" 이라는 2-step 표현 사용.
+
+  - id: Q16
+    category: cross-standard
+    query: "감사위험 모델의 구성요소(고유위험, 통제위험, 적발위험)는 각각 어떻게 정의되고 어디에서 다루어지는가?"
+    expected_primary_chunks:
+      - "200:13"    # (c), (e) 등의 정의
+    expected_related_chunks:
+      - "315:23"    # 고유·통제 위험
+      - "330:7"     # 적발위험에 대한 대응
+      - "330:18"    # 실증절차
+    notes: |
+      정의(200) + 평가(315) + 대응(330). 단일 hit 으로 해결 불가하므로
+      recall@10 기준 평가.
+
+  - id: Q17
+    category: cross-standard
+    query: "유의적 위험이 식별되었을 때 수행해야 하는 감사절차는?"
+    expected_primary_chunks:
+      - "315:27"    # 유의적 위험 결정
+      - "330:21"    # 유의적 위험에 대한 실증절차
+    expected_related_chunks:
+      - "315:12"    # (l) 정의
+      - "330:15"    # 통제의 운용효과성
+      - "240:26"    # 부정 RMM 이 유의적 위험인 경우
+    notes: |
+      전형적 cross-standard. 315(식별) ↔ 330(대응) ↔ 240(부정 맥락).
+
+  - id: Q18
+    category: cross-standard
+    query: "부정 위험을 평가할 때 내부통제 이해는 어떻게 연계되는가?"
+    expected_primary_chunks:
+      - "240:26"
+      - "315:14"
+    expected_related_chunks:
+      - "315:19"
+      - "240:18"   # 부정에 관한 내부통제
+      - "240:32"
+    notes: |
+      240(부정) + 315(통제이해) 간 cross-link. 실무자들이 실제 질문하는 유형.
+
+  - id: Q19
+    category: cross-standard
+    query: "회계추정에서의 경영진 편의(management bias)를 감사인은 어떻게 다루어야 하는가?"
+    expected_primary_chunks:
+      - "240:32"    # 분개·추정 검토
+    expected_related_chunks:
+      - "200:15"    # 전문가적 의구심
+      - "240:A45"   # 편의 사례
+      - "315:A11"
+    notes: |
+      ISA 540 이 파싱 대상이면 540 의 편의 관련 문단도 top-10 에 기대.
+      현재 말뭉치가 200/210/240/315/320/330/500/570/700 만 포함하면
+      240+200 조합으로 한정 채점.
+
+  # =========================================================
+  # CATEGORY 4: definitions (용어 정의, 7건)
+  # =========================================================
+
+  - id: Q20
+    category: definitions
+    query: "감사위험(audit risk) 이란 무엇인가?"
+    expected_primary_chunks:
+      - "200:13.(c)"   # logical_path: ¶13 바로 다음 (c) 서브아이템
+    expected_related_chunks:
+      - "200:13"
+      - "200:13.(e)"   # 적발위험
+      - "200:13.(n)"   # 중요왜곡표시위험
+    notes: |
+      Definitions 는 top-1 정확도가 핵심. 서브아이템 id 는 논리경로로 표기 후
+      하네스가 positional 해석(README 참조).
+
+  - id: Q21
+    category: definitions
+    query: "전문가적 의구심(professional skepticism) 의 정의는?"
+    expected_primary_chunks:
+      - "200:13.(l)"
+    expected_related_chunks:
+      - "200:13"
+      - "200:15"      # 요구사항
+      - "200:A18"     # 적용지침
+    notes: |
+      단일 (l) 서브아이템 하나에 정답이 집중됨 → MRR 로 heading_trail A/B 측정
+      가장 민감한 쿼리 중 하나.
+
+  - id: Q22
+    category: definitions
+    query: "중요왜곡표시위험(risk of material misstatement) 이란?"
+    expected_primary_chunks:
+      - "200:13.(n)"
+    expected_related_chunks:
+      - "200:13"
+      - "315:23"
+      - "330:5"
+    notes: |
+      top-1 = 200:13.(n). 관련 문단은 315/330 과 연결되어야 recall@10 가산.
+
+  - id: Q23
+    category: definitions
+    query: "수행중요성(performance materiality) 이란 무엇인가?"
+    expected_primary_chunks:
+      - "320:9"
+    expected_related_chunks:
+      - "320:11"
+      - "320:A12"
+      - "320:A13"
+    notes: |
+      ISA 320 ¶9 가 정의 문단. ¶11(결정 방법) 도 top-3 에 자주 등장.
+
+  - id: Q24
+    category: definitions
+    query: "부정(fraud) 과 오류(error) 의 구분은?"
+    expected_primary_chunks:
+      - "240:11"
+      - "240:12"
+    expected_related_chunks:
+      - "240:A1"
+      - "240:A2"
+      - "240:A3"
+    notes: |
+      ¶11(부정 정의), ¶12(부정위험요소) 가 한 쌍. "구분" 키워드로 오류
+      비교까지 요구.
+
+  - id: Q25
+    category: definitions
+    query: "감사증거(audit evidence) 의 정의와 충분성·적합성은?"
+    expected_primary_chunks:
+      - "500:5"
+    expected_related_chunks:
+      - "500:6"
+      - "500:7"
+      - "200:17"    # 전체 목표상의 충분성·적합성
+    notes: |
+      ¶5 정의 + ¶6-7 요구사항. 교차로 200 ¶17 까지 추천.
+
+  - id: Q26
+    category: definitions
+    query: "유의적 위험(significant risk) 의 정의는?"
+    expected_primary_chunks:
+      - "315:12.(l)"
+    expected_related_chunks:
+      - "315:12"
+      - "315:27"
+      - "330:21"
+    notes: |
+      ¶12(l) 서브아이템 정의 + ¶27 결정 요구사항 + 330 대응. definition
+      쿼리 중 cross-standard 색채가 강한 케이스.
+
+# =========================================================
+# 라벨링 품질 체크리스트 (평가 하네스에서 검증)
+# =========================================================
+# - [ ] 모든 expected_primary_chunks 가 parsed/chunks.jsonl 에 실제 존재
+#       (단, "X:N.(y)" 논리경로는 positional 해석 후 검증)
+# - [ ] expected_related_chunks 중 존재하지 않는 id 는 warning 만 출력
+# - [ ] category 당 최소 6건 (현재 7/6/6/7 = 26건)
