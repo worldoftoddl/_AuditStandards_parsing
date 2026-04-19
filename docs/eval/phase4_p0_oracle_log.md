@@ -2421,3 +2421,446 @@ P0 PR freeze (plan §11.4 condition 3) 외 사항. `src/audit_parser/chunk.py` /
   `src/audit_parser/structure.py` 또는 별도 ref-resolver) 의
   range-expansion regex 점검 — `A\d+\s*-\s*A?\s*\d+` 패턴 허용 여부.
   P0 P9 종결 후 별도 ticket.
+
+---
+
+## P3 — Requirements +5 / Application +5 / Definitions +5 oracle (Q36~Q50)
+
+**Status**: in_progress (DE owner, 2026-04-19, task#3)
+**Predecessor**: Commit 2.5 완료 (design skeleton freeze, oracle_log.md `96adad7`).
+**Plan ref**: `docs/eval/phase4_p0_plan.md` §7 Phase 3 (분배 (B) req 12 / app 11 / cross 15 / def 12).
+
+### Pilot rules (P3 적용)
+
+1. **DR-1~5 전수 적용** (P2 cross 와 동일).
+2. **DR-5(a) 완화**: P3 는 cross-standard 가 아니므로 "최소 2개 ISA primary" 미적용. category-별 single-ISA 가 자연 default.
+3. **DR-5(b)**: cross-section disjoint 만 적용 — P3 oracle 의 primary 가 P2 N1~N9 + P3 다른 oracle 의 primary 와 disjoint.
+4. **DR-5(c) Option D 적용**: primary section ∈ {requirements, application, definitions} (objective 제외). category 와 일치 (req oracle → section=requirements).
+5. **DR-6 ad-hoc review**: query 작성 후 DR-4 strict tokenization ∩ ∈ {2, 3} 발견 시 DA peer-DM 2-test (axis expansion + natural phrasing + token from primary top-20). PASS 시 enhanced query 채택, FAIL 시 그대로 수용 + (c) intentional gap 처리.
+6. **Phase 진행**: Requirements (Q36~Q40) → Application (Q41~Q45) → Definitions (Q46~Q50). 묶음 단위 DA spot-check.
+
+### Q36 — ISA 230 감사문서 형태·취합·보존 요구사항 (requirements)
+
+```yaml
+query_id: "Q36"
+category: "requirements"
+isa_focus: "230"
+question: "감사인은 감사문서를 어떻게 작성해야 하며, 최종감사파일을 취합하고, 보존기간 종료 전까지 감사문서를 어떻게 보존해야 하는가"
+oracle_primary:
+  - chunk_id: "230:00893:8"     # ¶8 감사문서 형태·내용·범위 (감사인은 감사문서를 작성해야 한다)
+  - chunk_id: "230:00911:14"    # ¶14 최종감사파일 취합
+  - chunk_id: "230:00912:15"    # ¶15 보존기간 종료 전 폐기 금지
+oracle_related:
+  expected_related_chunks:
+    - "230:00890:7"   # ¶7 적시 감사문서 작성 (선행 paragraph)
+    - "230:00897:9"   # ¶9 감사절차의 식별자 / 검토자
+    - "230:00901:10"  # ¶10 검토 사항
+    - "230:00902:11"  # ¶11 토의·결론
+    - "230:00904:12"  # ¶12 변경 사항
+    - "230:00906:13"  # ¶13 수행 시기
+```
+
+**chunk 본문 인용 (DR-1 stub 검증)**
+
+- `230:00893:8` (cc=165, refs=["A2","A3","A4","A5"]) heading_trail = ["감사기준서 230  감사문서", "요구사항", "수행한 감사절차와 입수한 감사증거의 문서화", "감사문서의 형태, 내용 및 범위"]
+  > "8. 감사인은 이전에 해당 감사에 관여되지 아니한 숙련된 감사인이 다음 사항을 충분히 이해할 수 있도록 감사문서를 작성해야 한다. (문단 A2-A5, A16-A17 참조)"
+- `230:00911:14` (cc=139, refs=["A21","A22"]) heading_trail = ["감사기준서 230  감사문서", "요구사항", "최종감사파일의 취합"]
+  > "14. 감사인은 감사와 관련된 문서들을 하나의 감사파일로 취합하여야 하며, 감사보고서일 후 최종감사파일을 취합하는 행정적인 절차를 적시에 완료하여야 한다. (문단 A21-A22 참조)"
+- `230:00912:15` (cc=172, refs=["A23"]) heading_trail = ["감사기준서 230  감사문서", "요구사항", "최종감사파일의 취합"]
+  > "15. 감사인은 최종감사파일의 취합이 완료된 후에는 그 보존기간 (주식회사 등의 외부감사에 관한 법률에 따른 감사의 경우 감사종료 시점부터 법정기한) 종료 전까지 어떠한 성격의 감사문서도 삭제하거나 폐기하여서는 안 된다. (문단 A23 참조)"
+
+**DR check**
+
+```
+[✓] DR-1 (req, NIT-Q36) — stub 패턴 부재
+    근거: 3 primary 모두 substantive 본문 (cc 165/139/172 > 115). lead-in "다음과 같다" 패턴 없음. ¶8 본문이 "다음 사항" 도입이지만 본 chunk 자체에 substantive 진술 ("감사문서를 작성해야 한다") 포함 → stub 아님 (substantive lead-in)
+[✓] DR-2 (req, NIT-Q36) — heading_trail 정합
+    근거: 230:8 = 요구사항/감사문서의 형태·내용·범위; 230:14/15 = 요구사항/최종감사파일의 취합. resolver 매핑 시 path-suffix `230:?:8/14/15` 직접 hit
+[✓] DR-3 (req, NIT-Q36) — paragraph_id numeric
+    근거: ["8"]/["14"]/["15"] 모두 numeric, Roman/alpha (i) 모호성 부재
+[✓] DR-4 (req, NIT-Q36) — strict tokenization ∩ ≥ 2
+    근거 (whitespace + lowercase + stopword {의,은,는,이,가,에,와,과,을,를,수,등,및,한,한다,있다,하는} 제거):
+    query top-20: [감사인은, 감사문서를(2), 어떻게(2), 작성해야, 하며, 최종감사파일을, 취합하고, 보존기간, 종료, 전까지, 보존해야, 하는가]
+    primary 230:8 ∩ {감사인은, 감사문서를, 작성해야} = 3
+    primary 230:14 ∩ {감사인은, 최종감사파일을} = 2 (hit, =2)
+    primary 230:15 ∩ {감사인은, 보존기간, 종료, 전까지} = 4
+[✓] DR-5(a) — req 카테고리, single-ISA 자연 default (P3 pilot rule §2)
+    근거: 모두 ISA 230 (intra-standard), DR-5(a) min 2 ISA 미적용 (P2 cross 전용)
+[✓] DR-5(b) (req, NIT-Q36) — 다른 oracle primary disjoint
+    근거: P2 N1~N9 primary 24개 ∪ P3 (Q37~Q50 미작성, 후속 점진 확장 시 재검증) 와 230:8/14/15 disjoint 확인 (N1~N9 중 ISA 230 chunk 없음)
+[✓] DR-5(c) (req, Option D) — primary section ∈ {requirements, application, definitions}
+    근거: 3 primary 모두 section=requirements (Option D 누적 P3 3/3 = 100% 유지)
+```
+
+→ 7 항목 (DR-5 3 sub-rule) 전수 ✓.
+
+**∩ margin 분류**: 230:8 ∩=3 (≥3) / 230:14 ∩=2 (=2 hit, DR-6 ad-hoc 후보) / 230:15 ∩=4 (≥3).
+
+**DR-6 ad-hoc trigger** (230:14 ∩=2):
+
+```yaml
+dr6_adhoc_review:
+  candidate_chunk_id: "230:00911:14"
+  current_intersection: 2
+  zone: "{2,3}_strict"
+  proposed_enhancement: "감사인은 감사문서를 작성해야 하며, 감사파일로 취합하여야 하고, 최종감사파일을 어떻게 취합하며 보존기간 종료 전까지 감사문서를 보존해야 하는가"
+  enhancement_added_tokens: ["감사파일로", "취합하여야"]
+  expected_intersection_post: 4   # +감사파일로, +취합하여야
+  da_2test_status: "pending"      # DA peer-DM 회부 예정 (Q36~Q40 묶음 발송)
+```
+
+### S4 prescreen 측정 보류 (P5 일괄)
+
+P2 N1~N9 와 동일 — P5 audit 시점 v3 신규 24 primary 일괄 측정.
+```
+
+### Q37 — ISA 450 왜곡표시 집계·평가·커뮤니케이션 요구사항 (requirements)
+
+```yaml
+query_id: "Q37"
+category: "requirements"
+isa_focus: "450"
+question: "감사인은 식별된 왜곡표시를 어떻게 집계하고, 경영진이 수정을 거절한 경우 그 사유를 어떻게 평가하며, 미수정왜곡표시를 지배기구와 어떻게 커뮤니케이션하여야 하는가"
+oracle_primary:
+  - chunk_id: "450:04211:5"     # ¶5 식별된 왜곡표시 집계 (lifecycle 1단계)
+  - chunk_id: "450:04219:9"     # ¶9 경영진 수정 거절 시 사유 평가 (lifecycle 2단계)
+  - chunk_id: "450:04226:12"    # ¶12 지배기구 커뮤니케이션 (lifecycle 3단계)
+oracle_related:
+  expected_related_chunks:
+    - "450:04213:6"   # ¶6 전반감사전략 수정 결정
+    - "450:04216:7"   # ¶7 적시 검토
+    - "450:04221:10"  # ¶10 미수정왜곡표시 평가 사전 중요성 재평가
+    - "450:04222:11"  # ¶11 미수정왜곡표시 중요성 결정 (N4 primary, related 로만 등록)
+    - "450:04227:13"  # ¶13 과거 미수정왜곡표시 영향
+    - "450:04229:14"  # ¶14 경영진 커뮤니케이션
+```
+
+**chunk 본문 인용 (DR-1 stub 검증)**
+
+- `450:04211:5` (cc=133, refs=["A2","A3","A4","A5","A6"]) heading_trail = ["감사기준서 450  감사 중 식별된 왜곡표시의 평가", "요구사항", "식별된 왜곡표시의 집계"]
+  > "5. 감사인은 명백하게 사소한(clearly trivial) 것을 제외하고는 감사 중 식별된 왜곡표시를 집계하여야 한다. (문단 A2-A6 참조)"
+- `450:04219:9` (cc=204, refs=["A13"]) heading_trail = ["감사기준서 450  감사 중 식별된 왜곡표시의 평가", "요구사항", "왜곡표시의 커뮤니케이션과 수정"]
+  > "9. 만약 경영진이 감사인이 커뮤니케이션한 왜곡표시의 일부 또는 전부에 대하여 수정을 거절하는 경우, 감사인은 경영진이 수정하지 않는 사유를 이해하여야 하며 재무제표 전체에 중요한 왜곡표시가 없는지 여부를 평가할 때 그 사유를 고려하여야 한다. (문단 A13 참조)"
+- `450:04226:12` (cc=259, refs=["A26","A27","A28"]) heading_trail = ["감사기준서 450  감사 중 식별된 왜곡표시의 평가", "요구사항", "미수정왜곡표시의 영향에 대한 평가", "지배기구와의 커뮤니케이션"]
+  > "12. 감사인은 법규상 금지되지 않는 한 미수정왜곡표시 및 이것이 개별적으로 또는 집합적으로 감사의견에 미칠 영향에 대하여 지배기구와 커뮤니케이션하여야 한다. 감사인은 커뮤니케이션을 할 때 중요한 미수정왜곡표시들을 개별적으로 식별하여야 한다. 감사인은 그러한 미수정왜곡표시들을 수정하도록 요청하여야 한다. (문단 A26-A28참조)"
+
+**DR check**
+
+```
+[✓] DR-1 (req, NIT-Q37) — stub 패턴 부재
+    근거: 3 primary 모두 substantive 본문 (cc 133/204/259 > 115). lead-in "다음과 같다" 패턴 없음
+[✓] DR-2 (req, NIT-Q37) — heading_trail 정합
+    근거: 450:5 = 요구사항/식별된 왜곡표시의 집계; 450:9 = 요구사항/왜곡표시의 커뮤니케이션과 수정; 450:12 = 요구사항/미수정왜곡표시의 영향에 대한 평가/지배기구와의 커뮤니케이션. resolver 매핑 path-suffix `450:?:5/9/12` 직접 hit
+[✓] DR-3 (req, NIT-Q37) — paragraph_id numeric
+    근거: ["5"]/["9"]/["12"] 모두 numeric, Roman/alpha (i) 모호성 부재
+[✓] DR-4 (req, NIT-Q37) — strict tokenization ∩ ≥ 2
+    근거 (whitespace + lowercase + stopword 제거):
+    query top-20: [감사인은, 식별된, 왜곡표시를, 어떻게(3), 집계하고,, 경영진이, 수정을, 거절한, 경우, 그, 사유를, 평가하며,, 미수정왜곡표시를, 지배기구와, 커뮤니케이션하여야, 하는가]
+    primary 450:5 ∩ {감사인은, 식별된, 왜곡표시를} = 3
+    primary 450:9 ∩ {감사인은, 경영진이(2), 수정을, 사유를, 그} = 5
+    primary 450:12 ∩ {감사인은, 지배기구와, 커뮤니케이션하여야} = 3 (hit, =3 — DR-6 ad-hoc 후보)
+[✓] DR-5(a) — req 카테고리, single-ISA 자연 default
+    근거: 모두 ISA 450 (intra-standard)
+[✓] DR-5(b) (req, NIT-Q37) — 다른 oracle primary disjoint
+    근거: P2 N4 primary {705:08655:8, 700:08024:18, 450:04222:11} ∩ Q37 primary {450:5, 9, 12} = ∅. 단 450:11 (N4) 가 본 Q37 expected_related 에 등록됨 → DA Clarification 1 schema (`primary_vs_related_overlap` reverse: N4 primary ↔ Q37 related). P5 retrofit 추적 필요
+[✓] DR-5(c) (req, Option D) — primary section ∈ {requirements, application, definitions}
+    근거: 3 primary 모두 section=requirements (Option D 누적 P3 6/6 = 100% 유지)
+```
+
+→ 7 항목 (DR-5 3 sub-rule) 전수 ✓.
+
+**∩ margin 분류**: 450:5 ∩=3 (=3 hit, DR-6 ad-hoc 후보) / 450:9 ∩=5 (≥3) / 450:12 ∩=3 (=3 hit, DR-6 ad-hoc 후보).
+
+**DR-6 ad-hoc trigger** (450:5 + 450:12 모두 ∩=3, 둘 다 zone {2,3}):
+
+```yaml
+dr6_adhoc_review:
+  - candidate_chunk_id: "450:04211:5"
+    current_intersection: 3
+    zone: "{2,3}_strict"
+    proposed_enhancement: "감사인은 명백하게 사소한 것을 제외한 감사 중 식별된 왜곡표시를 어떻게 집계하고, 경영진이 수정을 거절한 경우 사유를 어떻게 평가하며, 미수정왜곡표시를 지배기구와 어떻게 커뮤니케이션하여야 하는가"
+    enhancement_added_tokens: ["명백하게", "사소한", "감사", "중"]
+    expected_intersection_post: 7   # +명백하게, +사소한, +감사, +중
+    da_2test_status: "pending"
+  - candidate_chunk_id: "450:04226:12"
+    current_intersection: 3
+    zone: "{2,3}_strict"
+    proposed_enhancement: "감사인은 법규상 금지되지 않는 한 미수정왜곡표시 및 그것이 감사의견에 미칠 영향을 지배기구와 커뮤니케이션하여야 하는가; 식별된 왜곡표시 집계와 경영진 수정 거절 시 사유 평가도 함께 어떻게 수행하는가"
+    enhancement_added_tokens: ["법규상", "금지되지", "않는", "감사의견에", "영향을"]
+    expected_intersection_post: 6
+    da_2test_status: "pending"
+```
+
+**Cross-oracle primary-vs-related overlap 경계** (DA Clarification 1 schema 적용):
+
+```yaml
+primary_vs_related_overlap:
+  - source_oracle: "Q37"
+    source_role: "related"
+    target_oracle: "N4"
+    target_role: "primary"
+    chunk_id: "450:04222:11"
+    diagnostic_target: "P5 S4 cross-oracle primary-vs-related overlap (within-section 동일 ISA 450 within-requirements)"
+```
+
+### S4 prescreen 측정 보류 (P5 일괄)
+
+P2 N1~N9 와 동일 — P5 audit 시점 v3 신규 24 primary 일괄 측정.
+
+### Q38 — ISA 580 경영진 책임 서면진술·시기·기타 진술 요구사항 (requirements)
+
+```yaml
+query_id: "Q38"
+category: "requirements"
+isa_focus: "580"
+question: "감사인은 경영진에게 재무제표 작성 책임에 관한 서면진술을 어떤 형태로 요청하여야 하며, 서면진술일은 감사보고서일에 어떻게 근접하게 결정하여야 하는가, 또한 다른 감사기준서가 요구하는 추가 서면진술은 어떻게 요청하는가"
+oracle_primary:
+  - chunk_id: "580:06734:10"    # ¶10 재무제표 작성 책임 서면진술 (lifecycle 1단계)
+  - chunk_id: "580:06744:14"    # ¶14 서면진술일 / 대상기간 (lifecycle 2단계)
+  - chunk_id: "580:06742:13"    # ¶13 기타 서면진술 (lifecycle 3단계, β-prime swap from 580:15)
+oracle_related:
+  expected_related_chunks:
+    - "580:06731:9"   # ¶9 경영진 식별 / 책임 서두
+    - "580:06736:11"  # ¶11 정보 완전성 진술 (entry)
+    - "580:06746:15"  # ¶15 서면진술 형태 (β-prime swap source — related 강등)
+    - "580:06749:16"  # ¶16 신뢰성 의문 (entry)
+    - "580:06750:17"  # ¶17 일관성 부재 시 절차
+    - "580:06751:18"  # ¶18 신뢰 불가 시 705 연계
+```
+
+**chunk 본문 인용 (DR-1 stub 검증)**
+
+- `580:06734:10` (cc=200, refs=["A7","A8","A9"]) heading_trail = ["감사기준서 580  서면진술", "요구사항", "경영진책임에 관한 서면진술", "재무제표의 작성"]
+  > "10. 감사인은 감사업무 조건에서 정한 바와 같이 경영진이 해당 재무보고체계에 따라 재무제표를 작성할 책임 (관련성이 있는 경우 재무제표의 공정표시책임을 포함)을 완수하였다는 서면진술을 제공하도록 경영진에게 요청하여야 한다. (문단 A7-A9, A14, A22 참조)"
+- `580:06744:14` (cc=169, refs=["A15","A16","A17","A18"]) heading_trail = ["감사기준서 580  서면진술", "요구사항", "서면진술일과 대상기간"]
+  > "14. 서면진술일은 가능한 재무제표에 대한 감사보고서일에 실행가능한 가장 근접한 날로 하되, 감사보고서일보다 늦지 않아야 한다. 서면진술은 감사보고서에서 언급된 모든 재무제표와 기간을 대상으로 하여야 한다. (문단 A15-A18 참조)"
+- `580:06742:13` (cc=272, refs=["A10","A11","A12","A13"]) heading_trail = ["감사기준서 580  서면진술", "요구사항", "기타 서면진술"]
+  > "13. 이 감사기준서 외에 다른 감사기준서에서도 감사인에게 서면진술을 요청하도록 요구한다. 다른 감사기준서가 요구하는 그러한 진술 외에, 재무제표 또는 재무제표 내 (하나 또는 그 이상의) 특정 경영진주장과 관련된 다른 감사증거를 뒷받침할 수 있는 (하나 또는 그 이상의) 서면진술을 입수하는 것이 필요하다고 결정하는 경우에는, 감사인은 그러한 서면진술을 추가로 요청하여야 한다. (문단 A10-A13, A14, A22 참조)"
+
+**β-prime swap 결정 근거** (580:15 → 580:13):
+
+```yaml
+swap_decision:
+  original: "580:06746:15"   # 서면진술 형태 (¶15 cc=236)
+  swapped_to: "580:06742:13"  # 기타 서면진술 (¶13 cc=272)
+  reason:
+    - "DR-4 ∩ token 분석: 580:15 ∩=0~1 (감사인을 vs 감사인은 surface 분리, 형태이어야 vs 형태로 분리). 본문 'surface form drift' 가 strict tokenization 에서 매칭 실패"
+    - "swap target 580:13 ∩=4 (감사인은, 서면진술을, 재무제표, 요청하여야 직접 매칭)"
+    - "lifecycle 의미 측면: ¶10 (책임) → ¶14 (시기) → ¶13 (기타 서면진술 요청 expansion) 으로 더 wide coverage. ¶15 (형태) 는 cohesive but narrow"
+    - "DR-1: ¶15 cc=236 도 substantive (stub 아님), 단 query-primary token 매칭 실패가 DR-4 결정적"
+  reference: "P2 N3 (315:11→23 swap), N4 (705:6→8, 700:17→18 swap) precedent"
+```
+
+**DR check**
+
+```
+[✓] DR-1 (req, NIT-Q38) — stub 패턴 부재
+    근거: 3 primary 모두 substantive (cc 200/169/272 > 115)
+[✓] DR-2 (req, NIT-Q38) — heading_trail 정합
+    근거: 580:10 = 요구사항/경영진책임/재무제표의 작성; 580:14 = 요구사항/서면진술일과 대상기간; 580:13 = 요구사항/기타 서면진술. resolver 매핑 path-suffix `580:?:10/14/13` 직접 hit
+[✓] DR-3 (req, NIT-Q38) — paragraph_id numeric
+    근거: ["10"]/["14"]/["13"] 모두 numeric
+[✓] DR-4 (req, NIT-Q38) — strict tokenization ∩ ≥ 2 (β-prime swap 후)
+    근거 (whitespace + lowercase + stopword 제거):
+    query top-20: [감사인은, 경영진에게, 재무제표(2), 작성, 책임에, 관한, 서면진술을(2), 어떤, 형태로, 요청하여야(2), 하며, 서면진술일은, 감사보고서일에, 어떻게(2), 근접하게, 결정하여야, 또한, 다른, 감사기준서가, 요구하는, 추가, 요청하는가]
+    primary 580:10 ∩ {감사인은, 경영진에게, 서면진술을, 요청하여야} = 4
+    primary 580:14 ∩ {서면진술일은, 감사보고서일에} = 2 (hit, =2 — DR-6 ad-hoc 후보)
+    primary 580:13 ∩ {감사인은, 서면진술을, 재무제표, 요청하여야, 다른, 감사기준서가, 요구하는, 추가} = 8
+[✓] DR-5(a) — req 카테고리, single-ISA 자연 default
+    근거: 모두 ISA 580 (intra-standard)
+[✓] DR-5(b) (req, NIT-Q38) — 다른 oracle primary disjoint
+    근거: P2 N1~N9 ∪ P3 Q36/Q37 primary 와 ISA 580 chunk 0건 → ∅ ✓
+[✓] DR-5(c) (req, Option D) — primary section ∈ {requirements, application, definitions}
+    근거: 3 primary 모두 section=requirements (Option D 누적 P3 9/9 = 100% 유지)
+```
+
+→ 7 항목 (DR-5 3 sub-rule) 전수 ✓.
+
+**∩ margin 분류**: 580:10 ∩=4 (≥3) / 580:14 ∩=2 (=2 hit, DR-6 ad-hoc 후보) / 580:13 ∩=8 (≥3).
+
+**DR-6 ad-hoc trigger** (580:14 ∩=2):
+
+```yaml
+dr6_adhoc_review:
+  candidate_chunk_id: "580:06744:14"
+  current_intersection: 2
+  zone: "{2,3}_strict"
+  proposed_enhancement: "감사인은 경영진에게 재무제표 작성 책임 서면진술을 어떤 형태로 요청하여야 하며, 서면진술일은 감사보고서일에 가능한 근접한 날로 결정하고 서면진술은 감사보고서에서 언급된 모든 재무제표와 기간을 대상으로 하여야 하는가; 다른 감사기준서가 요구하는 추가 서면진술은 어떻게 요청하는가"
+  enhancement_added_tokens: ["가능한", "근접한", "날로", "감사보고서에서", "언급된", "모든", "기간을", "대상으로"]
+  expected_intersection_post: 8
+  da_2test_status: "pending"
+```
+
+### S4 prescreen 측정 보류 (P5 일괄)
+
+P2 N1~N9 와 동일 — P5 audit 시점 v3 신규 24 primary 일괄 측정.
+
+### Q39 — ISA 700 의견 형성·수신인·공정 표시 평가 요구사항 (requirements)
+
+```yaml
+query_id: "Q39"
+category: "requirements"
+isa_focus: "700"
+question: "감사인은 재무제표가 해당 재무보고체계에 따라 작성되었는지 의견을 어떻게 형성하여야 하며, 감사보고서는 해당 감사의 상황에 기초하여 적합한 수신인을 어떻게 기재하여야 하고, 재무제표가 공정한 표시를 달성하고 있는지 여부를 어떻게 평가하여야 하는가"
+oracle_primary:
+  - chunk_id: "700:08000:10"    # ¶10 의견 형성 핵심 entry
+  - chunk_id: "700:08032:22"    # ¶22 수신인 기재
+  - chunk_id: "700:08025:19"    # ¶19 공정 표시 평가 (준수체계 시)
+oracle_related:
+  expected_related_chunks:
+    - "700:08001:11"  # ¶11 의견 형성 결론 사항 lead-in
+    - "700:08005:12"  # ¶12 결론 도출
+    - "700:08015:14"  # ¶14 정성적 평가
+    - "700:08018:15"  # ¶15 재무보고체계 언급/기술 평가
+    - "700:08027:20"  # ¶20 감사보고서 서면방식 (cc=88, related 만)
+    - "700:08030:21"  # ¶21 감사보고서 제목
+    - "700:08034:23"  # ¶23 감사의견 단락
+```
+
+**chunk 본문 인용 (DR-1 stub 검증)**
+
+- `700:08000:10` (cc=122, refs=[]) heading_trail = ["감사기준서 700  재무제표에 대한 의견형성과 보고", "요구사항", "재무제표에 대한 의견형성"]
+  > "10. 감사인은 재무제표가 중요성의 관점에서 해당 재무보고체계에 따라 작성되었는지 여부에 대하여 의견을 형성하여야 한다."
+- `700:08032:22` (cc=136, refs=["A21"]) heading_trail = ["감사기준서 700  재무제표에 대한 의견형성과 보고", "요구사항", "감사보고서", "감사기준에 따라 수행된 감사에 대한 감사보고서", "수신인"]
+  > "22. 감사보고서는 해당 감사의 상황에 기초하여 적합한 수신인을 기재하여야 한다. (문단 A21 참조)"
+- `700:08025:19` (cc=296, refs=["A17"]) heading_trail = ["감사기준서 700  재무제표에 대한 의견형성과 보고", "요구사항", "의견의 형태"]
+  > "19. 재무제표가 준수체계에 따라 작성되는 경우, 감사인은 재무제표가 공정한 표시를 달성하고 있는지 여부를 평가하도록 요구되지 않는다. 그러나 감사인이 그러한 재무제표가 오도한다는 결론을 내리는 극히 드문 상황이라면, 감사인은 이 사항을 경영진과 논의하여야 한다. 또한 감사인은 이 사항이 어떻게 해결되었는지에 따라 감사보고서에 그러한 사항을 커뮤니케이션을 할 것인지 여부 및 어떻게 커뮤니케이션을 할 것인지 결정하여야 한다. (문단 A17 참조)"
+
+**stub 회피 결정**: 700:08027:20 (¶20 "감사인의 보고는 서면방식에 의하여야 한다." cc=88 < 115) 는 DR-1 stub 의심으로 primary 채택 하지 않고 related 만 등록. 본 ¶20 는 substantive single-sentence 이지만 char_count 임계 보수 적용.
+
+**DR check**
+
+```
+[✓] DR-1 (req, NIT-Q39) — stub 패턴 부재
+    근거: 3 primary 모두 substantive 본문 (cc 122/136/296). 700:10 cc=122 marginal (115 + 7) 정당화: ¶10 = 의견형성 root requirement, semantic substantive 강함, cc 단일 임계 marginal pass. ¶20 (cc=88) 회피로 stub-bias 차단
+[✓] DR-2 (req, NIT-Q39) — heading_trail 정합
+    근거: 700:10 = 요구사항/재무제표에 대한 의견형성; 700:22 = 요구사항/감사보고서/.../수신인; 700:19 = 요구사항/의견의 형태. resolver 매핑 path-suffix `700:?:10/22/19` 직접 hit
+[✓] DR-3 (req, NIT-Q39) — paragraph_id numeric
+    근거: ["10"]/["22"]/["19"] 모두 numeric
+[✓] DR-4 (req, NIT-Q39) — strict tokenization ∩ ≥ 2
+    근거 (whitespace + lowercase + stopword 제거):
+    query top-20: [감사인은(2), 재무제표가(2), 해당(2), 재무보고체계에, 따라, 작성되었는지, 의견을, 어떻게(3), 형성하여야, 하며,, 감사보고서는, 감사의, 상황에, 기초하여, 적합한, 수신인을, 기재하여야, 하고,, 공정한, 표시를, 달성하고, 있는지, 여부를, 평가하여야, 하는가]
+    primary 700:10 ∩ {감사인은, 재무제표가, 해당, 재무보고체계에, 따라, 작성되었는지, 의견을, 형성하여야} = 8
+    primary 700:22 ∩ {감사보고서는, 해당, 감사의, 상황에, 기초하여, 적합한, 수신인을, 기재하여야} = 8
+    primary 700:19 ∩ {재무제표가, 감사인은, 공정한, 표시를, 달성하고, 있는지, 여부를} = 7
+[✓] DR-5(a) — req 카테고리, single-ISA 자연 default
+    근거: 모두 ISA 700 (intra-standard)
+[✓] DR-5(b) (req, NIT-Q39) — 다른 oracle primary disjoint
+    근거: P2 N4 primary {700:18}, N5 primary {700:29} ∪ Q36/Q37/Q38 primary 와 700:10/22/19 disjoint ✓ (within-ISA cross-oracle within-requirements)
+[✓] DR-5(c) (req, Option D) — primary section ∈ {requirements, application, definitions}
+    근거: 3 primary 모두 section=requirements (Option D 누적 P3 12/12 = 100% 유지)
+```
+
+→ 7 항목 (DR-5 3 sub-rule) 전수 ✓.
+
+**∩ margin 분류**: 700:10 ∩=8 (≥3) / 700:22 ∩=8 (≥3) / 700:19 ∩=7 (≥3). DR-6 ad-hoc trigger 없음.
+
+**Cross-oracle within-ISA proximity 경계 사항**:
+
+```yaml
+monitored_pair:
+  - pair_id: "P-7"
+    pair_type: "cross_oracle_distant_same_isa"
+    oracles: ["N4", "Q39"]
+    isa: "700"
+    chunks: ["700:08024:18", "700:08000:10"]
+    distance_paragraphs: 8
+    diagnostic_target: "P5 S4 within-ISA cross-section adjacent (N4 700:18 ↔ Q39 700:10 의견형성 root)"
+  - pair_id: "P-8"
+    pair_type: "cross_oracle_distant_same_isa"
+    oracles: ["N5", "Q39"]
+    isa: "700"
+    chunks: ["700:08053:29", "700:08025:19"]
+    distance_paragraphs: 10
+    diagnostic_target: "P5 S4 within-ISA cross-section distant (N5 700:29 ↔ Q39 700:19 공정표시)"
+```
+
+ISA 700 cluster 가 N4/N5/Q39 3-oracle 분포 — ISA 315 cluster (N2/N3/N6) 와 동일 패턴. P5 within-ISA cluster diagnostic 누적.
+
+### S4 prescreen 측정 보류 (P5 일괄)
+
+P2 N1~N9 와 동일 — P5 audit 시점 v3 신규 24 primary 일괄 측정.
+
+### Q40 — ISA 610 내부감사기능 이용 결정·평가·커뮤니케이션 요구사항 (requirements)
+
+```yaml
+query_id: "Q40"
+category: "requirements"
+isa_focus: "610"
+question: "외부감사인은 내부감사기능이 수행한 업무를 활용할 영역과 범위를 어떻게 결정하며, 표명된 감사의견에 대한 책임을 고려하여 집합적으로 어떻게 평가하고, 지배기구와 어떻게 커뮤니케이션하여야 하는가"
+oracle_primary:
+  - chunk_id: "610:07502:17"    # ¶17 활용 영역·범위 결정 근거
+  - chunk_id: "610:07510:19"    # ¶19 집합적 평가 (전적 책임 고려)
+  - chunk_id: "610:07511:20"    # ¶20 지배기구 커뮤니케이션
+oracle_related:
+  expected_related_chunks:
+    - "610:07493:15"  # ¶15 객관성 평가 entry
+    - "610:07497:16"  # ¶16 적격성 평가 entry
+    - "610:07502:17"  # ¶17 자체 (primary)
+    - "610:07503:18"  # ¶18 작업 평가 절차 (sub-item lead-in)
+    - "610:07513:21"  # ¶21 활용 결정 검토
+    - "610:07514:22"  # ¶22 작업 적정성 평가
+    - "610:07515:23"  # ¶23 활용 시 작업 평가
+```
+
+**chunk 본문 인용 (DR-1 stub 검증)**
+
+- `610:07502:17` (cc=269, refs=["A15","A16","A17"]) heading_trail = ["감사기준서 610  내부감사인이 수행한 업무의 활용", "요구사항", "내부감사기능이 수행한 업무가 활용될 수 있는지 여부, 활용 영역 및 활용 범위의 결정", "활용 가능한 내부감사기능 수행 업무의 성격 및 범위의 결정"]
+  > "17. 내부감사기능이 수행한 업무가 활용될 수 있는 영역과 범위를 결정하는 근거로서, 외부감사인은 내부감사기능이 수행하였거나 수행예정인 업무의 성격 및 범위 그리고 외부감사인의 전반감사전략 및 감사계획에 대한 관련성을 고려하여야 한다. (문단 A15-A17 참조)"
+- `610:07510:19` (cc=265, refs=["A15","A16","A17","A18","A19","A20","A21","A22"]) heading_trail = ["감사기준서 610  내부감사인이 수행한 업무의 활용", "요구사항", "내부감사기능이 수행한 업무가 활용될 수 있는지 여부, 활용 영역 및 활용 범위의 결정", "활용 가능한 내부감사기능 수행 업무의 성격 및 범위의 결정"]
+  > "19. 외부감사인은 표명된 감사의견에 대한 외부감사인의 전적인 책임을 고려하여, 외부감사인은 내부감사기능이 수행한 업무를 계획된 범위까지 활용하여 외부감사인이 여전히 감사에 충분히 참여하도록 하는지를 집합적으로 평가하여야 한다. (문단 A15-A22 참조)"
+- `610:07511:20` (cc=240, refs=["A23"]) heading_trail = ["감사기준서 610  내부감사인이 수행한 업무의 활용", "요구사항", "내부감사기능이 수행한 업무가 활용될 수 있는지 여부, 활용 영역 및 활용 범위의 결정", "활용 가능한 내부감사기능 수행 업무의 성격 및 범위의 결정"]
+  > "20. 감사기준서 260에 따라 계획된 감사범위와 시기에 대한 개요를 지배기구와 커뮤니케이션할 때, 외부감사인은 내부감사기능이 수행한 업무를 어떻게 활용할 계획인지를 커뮤니케이션하여야 한다. (문단 A23 참고)"
+
+**DR check**
+
+```
+[✓] DR-1 (req, NIT-Q40) — stub 패턴 부재
+    근거: 3 primary 모두 substantive 본문 (cc 269/265/240 모두 ≥ 240, robust). lead-in "다음과 같다" 패턴 없음
+[✓] DR-2 (req, NIT-Q40) — heading_trail 정합
+    근거: 3 primary 모두 동일 sub-section "활용 가능한 내부감사기능 수행 업무의 성격 및 범위의 결정" 하위 (cohesive). resolver 매핑 path-suffix `610:?:17/19/20` 직접 hit
+[✓] DR-3 (req, NIT-Q40) — paragraph_id numeric
+    근거: ["17"]/["19"]/["20"] 모두 numeric
+[✓] DR-4 (req, NIT-Q40) — strict tokenization ∩ ≥ 2
+    근거 (whitespace + lowercase + stopword 제거):
+    query top-20: [외부감사인은, 내부감사기능이, 수행한, 업무를, 활용할, 영역과, 범위를, 어떻게(3), 결정하며,, 표명된, 감사의견에, 대한, 책임을, 고려하여, 집합적으로, 평가하고,, 지배기구와, 커뮤니케이션하여야, 하는가]
+    primary 610:17 ∩ {내부감사기능이, 수행한, 영역과, 범위를} = 4
+    primary 610:19 ∩ {외부감사인은, 내부감사기능이, 수행한, 업무를, 표명된, 감사의견에, 대한, 책임을, 집합적으로} = 9
+    primary 610:20 ∩ {외부감사인은, 내부감사기능이, 수행한, 업무를, 지배기구와, 커뮤니케이션하여야} = 6
+[✓] DR-5(a) — req 카테고리, single-ISA 자연 default
+    근거: 모두 ISA 610 (intra-standard)
+[✓] DR-5(b) (req, NIT-Q40) — 다른 oracle primary disjoint
+    근거: P2 N1~N9 ∪ P3 Q36~Q39 primary 와 ISA 610 chunk 0건 → ∅ ✓
+[✓] DR-5(c) (req, Option D) — primary section ∈ {requirements, application, definitions}
+    근거: 3 primary 모두 section=requirements (Option D 누적 P3 15/15 = 100% 유지, 종합 누적 27/27)
+```
+
+→ 7 항목 (DR-5 3 sub-rule) 전수 ✓.
+
+**∩ margin 분류**: 610:17 ∩=4 (≥3) / 610:19 ∩=9 (≥3) / 610:20 ∩=6 (≥3). DR-6 ad-hoc trigger 없음.
+
+### S4 prescreen 측정 보류 (P5 일괄)
+
+P2 N1~N9 와 동일 — P5 audit 시점 v3 신규 24 primary 일괄 측정.
+
+---
+
+## P3 Phase 1 (Requirements Q36~Q40) — DA spot-check 대기
+
+**Status**: 5/15 oracle 작성 완료 (Q36~Q40), Application + Definitions 미진입.
+
+| oracle | ISA | primary count | DR 7/7 | swap | DR-6 ad-hoc | ∩ 분포 |
+|---|---|---:|---|---|---|---|
+| Q36 | 230 | 3 | ✓ | 0 | 1 (230:14 ∩=2) | 3/2/4 |
+| Q37 | 450 | 3 | ✓ | 0 | 2 (450:5 ∩=3, 450:12 ∩=3) | 3/5/3 |
+| Q38 | 580 | 3 | ✓ | 1 (580:15→13 β-prime) | 1 (580:14 ∩=2) | 4/2/8 |
+| Q39 | 700 | 3 | ✓ | 0 | 0 | 8/8/7 |
+| Q40 | 610 | 3 | ✓ | 0 | 0 | 4/9/6 |
+
+**P3 Requirements 누적**: primary 15 / DR 35/35 ✓ / swap 1건 / DR-6 ad-hoc 4 cases / ∩ 분포 ≥3:11, =3:2, =2:2.
+
+**Cross-oracle 추가 proximity (P-7, P-8)**: ISA 700 cluster (N4/N5/Q39 3-oracle 분포) — P5 within-ISA cluster diagnostic 누적.
+
+**Cross-oracle primary-vs-related overlap (Q37 ↔ N4, 1건 추가)**: 450:11 N4 primary ↔ Q37 related (within-ISA within-requirements). P5 retrofit 추적.
+
+DA Phase 1 Requirements 묶음 spot-check 대기. PASS 시 → Phase 2 (Application Q41~Q45) 진입. DR-6 ad-hoc 4 cases 묶어 DA 2-test 회부.
