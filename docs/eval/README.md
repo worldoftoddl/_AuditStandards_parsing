@@ -39,11 +39,24 @@
 
 ## 3. `chunk_id` 해석 규약 ★ 중요
 
-### 3.1 문제
+### 3.1 문제 (Phase 2d self-audit 실측 반영 — 2026-04-19)
 
 `src/audit_parser/chunk.py::_chunk_id` 의 포맷은 `{isa_no}:{paragraph_id}` 이다.
 최상위 숫자 문단(예: `200:13`)은 ISA 안에서 유일하지만, 서브아이템
 (`(a)`, `(b)`, `(i)` …)은 **같은 ISA 내에서 반복 등장**한다.
+
+**실측 중복 규모 (parsed/chunks.jsonl 4526 rows)**:
+- Unique chunk_ids: **3170**
+- Duplicate chunk_ids: **344** (중복 발생 ID 수)
+- Row-level loss risk: **1356 rows** (DB PK 가 chunk_id 단일이라면 upsert last-write-wins 로 사라짐)
+- 최악: `?:(a)` x96, `?:(b)` x95, `700:(b)` x20, `540:(a)` x17, `610:(a)` x15 …
+
+**정의 영역의 실제 오염 사례 (ISA 200 ¶13)**:
+- `200:(c)` 는 chunks.jsonl 에 **2회** 저장되어 있음:
+  1. heading_trail=`용어의 정의` → `(c) 감사위험 – 재무제표가 중요하게 왜곡표시되어…` ← **정답**
+  2. heading_trail=`적용지침 > 재무제표감사 > 재무제표의 작성` → `(c) 감사인에게 다음 사항들을 제공할 책임…`
+- `200:(e)` 도 동일 구조. `(e) 적발위험 – 감사위험을 수용가능한…` (정답) vs `(e) 발생할 경우 중요하다(즉, 규모)` (중요왜곡표시위험 설명의 서브아이템)
+- 정의 ¶13 의 (a)~(j) 는 거의 모두 heading_trail 이 **다른 섹션** 으로 오염됨. (k)~(o) 만 `용어의 정의` 아래 올바로 배치됨.
 
 예: `parsed/chunks.jsonl` 에서 `200:` 접두어로 grep 해 보면
 
@@ -67,14 +80,17 @@ chunk_id 와 직접 매칭되지 않는다.**
 `queries.yaml` 에서 `"{isa}:{N}.(x)"` 형태(점 + 괄호)가 나타나면:
 
 1. 하네스는 chunks.jsonl 을 ISA·문서 순서대로 로드한 뒤,
-2. `chunk_id == "{isa}:{N}"` 인 청크를 찾고,
-3. 그 이후 등장하는 **첫 `{isa}:(x)` 청크**를 해당 논리경로의 정답으로 취급한다.
-4. 단, 그 사이에 다음 숫자 문단 `{isa}:{N+1}` 이 나오면 해당 서브아이템은
+2. `chunk_id == "{isa}:{N}"` 인 청크의 `heading_trail` 을 기록(이를 `parent_trail` 이라 함),
+3. 그 이후 등장하는 `{isa}:(x)` 청크들 중 **heading_trail 이 `parent_trail` 과 공통 suffix 를 공유** 하는 **첫 매치**를 해당 논리경로의 정답으로 취급한다.
+   - 단순 first-match 는 오염된 중복 서브아이템을 잘못 선택함 (§3.1 참조). heading_trail 필터가 **필수**.
+   - 예: `"200:13.(c)"` 해석 시 parent=`200:13` 의 trail=`…> 용어의 정의` 이므로, heading_trail 에 `용어의 정의` 가 포함된 `200:(c)` 만 유효.
+4. 그 사이에 다음 숫자 문단 `{isa}:{N+1}` 이 나오거나 heading_trail 필터 조건을 만족하는 매치가 없으면 해당 서브아이템은
    **존재하지 않음**으로 판정하고 warning 로그 남김.
+5. **DB 실제 저장 상태 확인**: harness 는 실행 전 `SELECT chunk_id, COUNT(*) FROM audit_chunks GROUP BY chunk_id HAVING COUNT(*) > 1` 로 DB 내 잠재적 중복을 exclude 확인. DB 가 단일 PK 라면 `parsed/chunks.jsonl` 의 last 버전만 살아있으므로, 정답 청크 누락을 감지할 수 있도록 logical_path 해석 시 **jsonl 순서의 첫 매치 ≠ DB 저장 청크**인 케이스 warning.
 
 이 규약을 따르면 라벨링 측에서는 자연스러운 논리경로
 (`200:13.(c)` = "200 ¶13 의 (c) 서브아이템") 로 표기하고, 하네스는
-위치 기반으로 해석한다.
+위치 + heading_trail 필터로 해석한다.
 
 ### 3.3 장기 개선 제안 (리더 참고)
 

@@ -172,6 +172,13 @@ class UpstageEmbedder:
     def embed_query(self, text: str) -> list[float]:
         return self._call(self.query_model, [text])[0]
 
+    def embed_queries(self, texts: Sequence[str]) -> list[list[float]]:
+        """Batch-embed query strings using the query model."""
+        out: list[list[float]] = []
+        for i in range(0, len(texts), self.batch_size):
+            out.extend(self._call(self.query_model, texts[i : i + self.batch_size]))
+        return out
+
 
 # ── BGE-M3 fallback (local) ─────────────────────────────────────────────────
 class BgeEmbedder:

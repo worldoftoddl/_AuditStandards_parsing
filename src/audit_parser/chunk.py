@@ -45,12 +45,26 @@ def _format_paragraph_id_prefix(pid: str | None) -> str:
     return f"{pid}. "
 
 
-def _chunk_id(isa_no: str, paragraph_ids: list[str], content_hash: str) -> str:
+def _chunk_id(
+    isa_no: str,
+    block_ordinal: int,
+    paragraph_ids: list[str],
+    content_hash: str,
+) -> str:
+    """Return the deterministic unique chunk identifier.
+
+    Format: ``{isa_no}:{block_ordinal:05d}:{para_ids_joined}``. The
+    5-digit zero-padded ordinal is the primary ``RawBlock.ordinal`` of
+    the chunk and guarantees uniqueness even when the same
+    ``paragraph_id`` (e.g. ``(c)``) appears in multiple sections of the
+    same ISA — the Phase 3 plan ``phase3-chunk-id-v2`` requirement.
+    """
+    ordinal_str = f"{block_ordinal:05d}"
     if paragraph_ids:
         joined = "+".join(paragraph_ids)
-        return f"{isa_no or 'preamble'}:{joined}"
+        return f"{isa_no or 'preamble'}:{ordinal_str}:{joined}"
     # Fallback when the chunk has no id at all (rare — used for preamble blocks).
-    return f"{isa_no or 'preamble'}:{content_hash[:12]}"
+    return f"{isa_no or 'preamble'}:{ordinal_str}:{content_hash[:12]}"
 
 
 def _build_chunk(
@@ -59,6 +73,7 @@ def _build_chunk(
     extras: list[Block],
     isa_no: str,
     isa_title: str,
+    include_heading_trail: bool = True,
 ) -> Chunk:
     """Compose a Chunk from a primary block and its merged continuations."""
     all_blocks = [primary, *extras]
@@ -76,7 +91,7 @@ def _build_chunk(
         prefix = _format_paragraph_id_prefix(b.paragraph_id)
         body_lines.append(f"{prefix}{b.text}".strip())
 
-    trail_str = _heading_prefix(primary.heading_trail)
+    trail_str = _heading_prefix(primary.heading_trail) if include_heading_trail else ""
     body_str = "\n".join(body_lines)
     embed_text = f"{trail_str}\n\n{body_str}" if trail_str else body_str
 
@@ -91,12 +106,13 @@ def _build_chunk(
     is_appendix = section == "appendix"
 
     return Chunk(
-        chunk_id=_chunk_id(isa_no, unique_ids, content_hash),
+        chunk_id=_chunk_id(isa_no, primary.ordinal, unique_ids, content_hash),
         isa_no=isa_no,
         isa_title=isa_title,
         section=section,
         heading_trail=list(primary.heading_trail),
         paragraph_ids=unique_ids,
+        block_ordinal=primary.ordinal,
         is_application_guidance=is_app,
         is_appendix=is_appendix,
         text=embed_text,
@@ -107,7 +123,12 @@ def _build_chunk(
     )
 
 
-def _chunk_standard(std: Standard | None, blocks: list[Block]) -> list[Chunk]:
+def _chunk_standard(
+    std: Standard | None,
+    blocks: list[Block],
+    *,
+    include_heading_trail: bool = True,
+) -> list[Chunk]:
     """Walk a block sequence, merging continuations, emitting chunks."""
     isa_no = std.number if std is not None else ""
     isa_title = std.title if std is not None else ""
@@ -123,7 +144,13 @@ def _chunk_standard(std: Standard | None, blocks: list[Block]) -> list[Chunk]:
         for bid in pending_order:
             primary, extras = pending[bid]
             chunks.append(
-                _build_chunk(primary=primary, extras=extras, isa_no=isa_no, isa_title=isa_title)
+                _build_chunk(
+                    primary=primary,
+                    extras=extras,
+                    isa_no=isa_no,
+                    isa_title=isa_title,
+                    include_heading_trail=include_heading_trail,
+                )
             )
         pending.clear()
         pending_order.clear()
@@ -156,10 +183,20 @@ def _chunk_standard(std: Standard | None, blocks: list[Block]) -> list[Chunk]:
     return chunks
 
 
-def chunk_document(doc: Document) -> list[Chunk]:
-    """Produce a flat list of Chunks for the whole Document, preamble first."""
+def chunk_document(doc: Document, *, include_heading_trail: bool = True) -> list[Chunk]:
+    """Produce a flat list of Chunks for the whole Document, preamble first.
+
+    ``include_heading_trail=False`` strips the ``"ISA > section > …"`` prefix
+    from the embed text. Used by the Phase 3 A/B-2 study — the structural
+    metadata on the chunk (``heading_trail``, ``section``, ``paragraph_ids``)
+    is preserved in either mode so filtering still works.
+    """
     all_chunks: list[Chunk] = []
-    all_chunks.extend(_chunk_standard(None, doc.preamble))
+    all_chunks.extend(
+        _chunk_standard(None, doc.preamble, include_heading_trail=include_heading_trail)
+    )
     for std in doc.standards:
-        all_chunks.extend(_chunk_standard(std, std.blocks))
+        all_chunks.extend(
+            _chunk_standard(std, std.blocks, include_heading_trail=include_heading_trail)
+        )
     return all_chunks

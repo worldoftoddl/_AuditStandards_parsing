@@ -19,7 +19,7 @@ import dataclasses
 import json
 import os
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -30,6 +30,7 @@ from .docx_reader import read_docx
 from .embed import (
     DEFAULT_DIM,
     DEFAULT_QUERY_MODEL,
+    BgeEmbedder,
     EmbedCache,
     EmbedRequest,
     UpstageEmbedder,
@@ -41,6 +42,23 @@ from .structure import build_document
 
 app = typer.Typer(help="KICPA 감사인증기준 DOCX → pgvector pipeline")
 console = Console()
+
+
+def _make_embedder(kind: str = "passage") -> Any:
+    """Pick an embedder based on ``EMBED_PROVIDER`` env.
+
+    ``kind="passage"`` for ingestion (store vectors) and ``kind="query"``
+    for search-time embeddings. Upstage uses different endpoints; BGE
+    uses the same model for both but normalizes the same way.
+    """
+    provider = os.environ.get("EMBED_PROVIDER", "bge").lower()
+    if provider == "upstage":
+        if kind == "query":
+            return UpstageEmbedder(passage_model=DEFAULT_QUERY_MODEL)
+        return UpstageEmbedder()
+    if provider == "bge":
+        return BgeEmbedder()
+    raise typer.BadParameter(f"Unknown EMBED_PROVIDER={provider!r} (use 'bge' or 'upstage')")
 
 
 def _resolve_dsn(explicit: str | None) -> str:
@@ -204,7 +222,7 @@ def embed(
 ) -> None:
     """Populate the embedding cache for every chunk without pgvector writes."""
     chunks = _load_chunks(chunks_jsonl)
-    embedder = UpstageEmbedder()
+    embedder = _make_embedder("passage")
     cache = EmbedCache(cache_path)
     try:
         reqs = [EmbedRequest(content_hash=c.content_hash, text=c.text) for c in chunks]
@@ -236,7 +254,7 @@ def upsert(
     dsn = _resolve_dsn(dsn)
 
     chunks = _load_chunks(chunks_jsonl)
-    embedder = UpstageEmbedder()
+    embedder = _make_embedder("passage")
     cache = EmbedCache(cache_path)
     reqs = [EmbedRequest(content_hash=c.content_hash, text=c.text) for c in chunks]
     vectors = embed_with_cache(embedder, reqs, cache)
@@ -262,7 +280,7 @@ def search(
     from .db import search as db_search
 
     dsn = _resolve_dsn(dsn)
-    embedder = UpstageEmbedder(passage_model=DEFAULT_QUERY_MODEL)
+    embedder = _make_embedder("query")
     qvec = embedder.embed_query(query)
     with psycopg.connect(dsn) as conn:
         hits = db_search(conn, qvec, top_k=top_k, isa_no=isa_no, section=section)
@@ -282,6 +300,136 @@ def search(
             h.text[:120] + ("…" if len(h.text) > 120 else ""),
         )
     console.print(table)
+
+
+@app.command()
+def eval_run(
+    queries: Annotated[Path, typer.Option("--queries")] = Path("docs/eval/queries.yaml"),
+    chunks_jsonl: Annotated[Path, typer.Option("--chunks")] = Path("parsed/chunks.jsonl"),
+    table: Annotated[str, typer.Option("--table")] = "audit_chunks",
+    top_k: Annotated[int, typer.Option("--top-k")] = 10,
+    output: Annotated[Path, typer.Option("--output")] = Path(".work/eval_latest.json"),
+    dsn: Annotated[str | None, typer.Option("--dsn")] = None,
+) -> None:
+    """Run the eval harness against a chosen pgvector table.
+
+    The chunks file is only used to resolve logical chunk-ids
+    (``{isa}:{N}.(x)``) into concrete ids — no embeddings are generated
+    from it. The actual search hits come from the pgvector table.
+    """
+    import json
+
+    import psycopg
+
+    from .db import SearchHit
+    from .eval import load_queries, result_to_dict, run_eval, summarize
+
+    dsn = _resolve_dsn(dsn)
+    chunks = _load_chunks(chunks_jsonl)
+    cases, resolver_log = load_queries(queries, chunks)
+    console.print(
+        f"[green]eval[/] {len(cases)} queries × table={table} (top_k={top_k}) "
+        f"resolver_log={len(resolver_log)} entries"
+    )
+
+    embedder = _make_embedder("query")
+    with psycopg.connect(dsn) as conn:
+        def _search_fn(qvec: list[float], k: int) -> list[SearchHit]:
+            # Inline query to allow per-table routing without exporting
+            # every parameter shape from db.search.
+            sql = f"""
+            SELECT chunk_id, isa_no, section, paragraph_ids, heading_trail, text,
+                   (embedding <=> %s::vector) AS distance
+            FROM {table}
+            WHERE is_toc = FALSE
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s;
+            """
+            from .db import _vector_literal
+
+            lit = _vector_literal(qvec)
+            with conn.cursor() as cur:
+                cur.execute(sql, (lit, lit, k))
+                hits = []
+                for cid, isa, sec, pids, trail, text, dist in cur.fetchall():
+                    hits.append(
+                        SearchHit(
+                            chunk_id=cid,
+                            isa_no=isa,
+                            section=sec,
+                            paragraph_ids=list(pids) if pids else [],
+                            heading_trail=list(trail) if trail else [],
+                            text=text,
+                            score=1.0 - float(dist),
+                        )
+                    )
+                return hits
+
+        results = run_eval(embedder, _search_fn, cases, top_k=top_k)
+
+    summary = summarize(results)
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(
+            {
+                "table": table,
+                "provider": os.environ.get("EMBED_PROVIDER", "bge"),
+                "embed_model": getattr(embedder, "model", "?"),
+                "by_category": summary.by_category,
+                "overall": summary.overall,
+                "ci": {k: list(v) for k, v in summary.ci.items()},
+                "unresolved_paths": summary.unresolved_paths,
+                "resolver_log": [
+                    {
+                        "query_id": e.query_id,
+                        "logical_path": e.logical_path,
+                        "concrete_chunk_id": e.concrete_chunk_id,
+                        "parent_section": e.parent_section,
+                        "block_ordinal": e.block_ordinal,
+                    }
+                    for e in resolver_log
+                ],
+                "results": [result_to_dict(r) for r in results],
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    tbl = Table(title=f"eval summary — {table}")
+    tbl.add_column("category")
+    tbl.add_column("n", justify="right")
+    tbl.add_column("recall@5", justify="right")
+    tbl.add_column("precision@5", justify="right")
+    tbl.add_column("MRR", justify="right")
+    tbl.add_column("nDCG@10", justify="right")
+    for cat, row in summary.by_category.items():
+        tbl.add_row(
+            cat,
+            f"{int(row['n'])}",
+            f"{row['recall@5']:.3f}",
+            f"{row['precision@5']:.3f}",
+            f"{row['mrr']:.3f}",
+            f"{row['ndcg@10']:.3f}",
+        )
+    tbl.add_row(
+        "OVERALL",
+        f"{int(summary.overall['n'])}",
+        f"{summary.overall['recall@5']:.3f}",
+        f"{summary.overall['precision@5']:.3f}",
+        f"{summary.overall['mrr']:.3f}",
+        f"{summary.overall['ndcg@10']:.3f}",
+        style="bold",
+    )
+    console.print(tbl)
+    lo, hi = summary.ci["recall@5"]
+    console.print(
+        f"recall@5 95% CI: [{lo:.3f}, {hi:.3f}]  "
+        f"unresolved paths: {len(summary.unresolved_paths)}"
+    )
+    console.print(f"[green]written[/] {output}")
 
 
 @app.command()

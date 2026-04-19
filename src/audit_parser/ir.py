@@ -146,12 +146,13 @@ class Block:
 class Chunk:
     """Retrieval-ready chunk. Produced by chunk.py from Block(s)."""
 
-    chunk_id: str  # f"{isa_no}:{paragraph_id}" or hash-based for merges
+    chunk_id: str  # f"{isa_no}:{block_ordinal:05d}:{paragraph_id}" — unique per block
     isa_no: str  # "200","210", …; "" for preamble
     isa_title: str
     section: str  # intro/objective/definitions/requirements/application/appendix/other
     heading_trail: list[str]
     paragraph_ids: list[str]  # possibly merged
+    block_ordinal: int  # primary block's RawBlock.ordinal — disambiguates reused paragraph_ids
     is_application_guidance: bool
     is_appendix: bool
     text: str  # final embed target — may include heading_trail prefix

@@ -21,6 +21,11 @@ def schema_sql() -> str:
     return _create_schema_sql(1024)
 
 
+@pytest.fixture(scope="module")
+def notrail_schema_sql() -> str:
+    return _create_schema_sql(1024, "audit_chunks_notrail")
+
+
 # ── Column presence ──────────────────────────────────────────────────────────
 
 
@@ -34,6 +39,14 @@ def test_schema_has_embed_model_column(schema_sql: str) -> None:
 
 def test_schema_has_updated_at_column(schema_sql: str) -> None:
     assert "updated_at" in schema_sql, "updated_at column missing from schema"
+
+
+def test_schema_has_block_ordinal_column(schema_sql: str) -> None:
+    assert "block_ordinal" in schema_sql, "block_ordinal column missing from schema"
+
+
+def test_schema_block_ordinal_is_not_null(schema_sql: str) -> None:
+    assert "block_ordinal   INTEGER NOT NULL" in schema_sql
 
 
 # ── Index strategy ───────────────────────────────────────────────────────────
@@ -57,14 +70,45 @@ def test_schema_embed_model_index(schema_sql: str) -> None:
     )
 
 
+def test_schema_has_block_ordinal_index(schema_sql: str) -> None:
+    assert "audit_chunks_block_ordinal_idx" in schema_sql, (
+        "block_ordinal index missing — needed for ORDER BY + debugging"
+    )
+
+
+def test_schema_block_ordinal_index_covers_isa_no(schema_sql: str) -> None:
+    assert "(isa_no, block_ordinal)" in schema_sql
+
+
 # ── Unique constraint ────────────────────────────────────────────────────────
 
 
 def test_schema_unique_constraint_includes_embed_model(schema_sql: str) -> None:
     """UNIQUE (source_path, content_hash, embed_model) prevents duplicate
     embeddings of the same content with the same model."""
-    assert "uq_source_hash_model" in schema_sql
+    assert "uq_audit_chunks_source_hash_model" in schema_sql
     assert "source_path, content_hash, embed_model" in schema_sql
+
+
+# ── table_name parameterization ──────────────────────────────────────────────
+
+
+def test_notrail_schema_uses_notrail_table_name(notrail_schema_sql: str) -> None:
+    """audit_chunks_notrail DDL must use its own table and index names."""
+    assert "audit_chunks_notrail" in notrail_schema_sql
+    assert "audit_chunks_notrail_embedding_idx" in notrail_schema_sql
+    assert "uq_audit_chunks_notrail_source_hash_model" in notrail_schema_sql
+
+
+def test_notrail_schema_does_not_reference_audit_chunks_table(
+    notrail_schema_sql: str,
+) -> None:
+    """Parameterized DDL must not hard-code the default table name."""
+    # The string "audit_chunks" appears as a substring of "audit_chunks_notrail",
+    # so check the exact table reference in CREATE TABLE.
+    assert "CREATE TABLE IF NOT EXISTS audit_chunks_notrail" in notrail_schema_sql
+    assert "CREATE TABLE IF NOT EXISTS audit_chunks\n" not in notrail_schema_sql
+    assert "CREATE TABLE IF NOT EXISTS audit_chunks " not in notrail_schema_sql
 
 
 # ── Upsert DO UPDATE ─────────────────────────────────────────────────────────
@@ -72,7 +116,6 @@ def test_schema_unique_constraint_includes_embed_model(schema_sql: str) -> None:
 
 def test_upsert_sql_has_updated_at() -> None:
     """DO UPDATE must refresh updated_at so re-embedding runs are trackable."""
-
     src = inspect.getsource(upsert_chunks)
     assert "updated_at" in src, "DO UPDATE SET clause must include updated_at = now()"
 
@@ -80,6 +123,19 @@ def test_upsert_sql_has_updated_at() -> None:
 def test_upsert_sql_has_embed_model_in_do_update() -> None:
     src = inspect.getsource(upsert_chunks)
     assert "embed_model" in src, "DO UPDATE SET clause must include embed_model"
+
+
+def test_upsert_sql_has_block_ordinal_in_do_update() -> None:
+    src = inspect.getsource(upsert_chunks)
+    assert "block_ordinal" in src, "upsert_chunks must include block_ordinal"
+
+
+def test_upsert_filters_unknown_isa() -> None:
+    """upsert_chunks must skip chunks with isa_no == '?'."""
+    src = inspect.getsource(upsert_chunks)
+    assert 'isa_no == "?"' in src or "isa_no == '?'" in src, (
+        "upsert_chunks must filter out isa_no='?' chunks"
+    )
 
 
 # ── Function signature ───────────────────────────────────────────────────────
@@ -93,6 +149,13 @@ def test_upsert_chunks_embed_model_is_keyword_only() -> None:
     assert param.kind == inspect.Parameter.KEYWORD_ONLY, (
         "embed_model must be keyword-only (after *)"
     )
+
+
+def test_upsert_chunks_table_name_is_keyword_only() -> None:
+    sig = inspect.signature(upsert_chunks)
+    param = sig.parameters.get("table_name")
+    assert param is not None, "upsert_chunks missing table_name parameter"
+    assert param.kind == inspect.Parameter.KEYWORD_ONLY
 
 
 # ── dim placeholder ──────────────────────────────────────────────────────────
